@@ -192,7 +192,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .mobile-tabbar { display: none; }
 @media (max-width: 860px) {
   body { -webkit-text-size-adjust: 100%; }
-  .header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  .header { padding: calc(12px + env(safe-area-inset-top)) 14px 12px; flex-wrap: wrap; gap: 8px; }
+  .btn-logout { border-color: var(--accent-red); color: var(--accent-red); order: 2; }
   .header-left { gap: 10px; flex: 1 1 100%; }
   .brand .sub { display: none; }
   .project-select { max-width: 56vw; }
