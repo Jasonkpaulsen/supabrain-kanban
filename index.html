@@ -266,6 +266,16 @@ body {
 .card-due.overdue { color: var(--accent-red); }
 .card-comments { display: flex; align-items: center; gap: 4px; }
 .card-assignee { font-size: 11px; color: var(--text-dim); }
+.card-type-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+  color: #fff; white-space: nowrap; display: inline-flex; align-items: center; gap: 2px;
+}
+.type-bug { background: #f85149; }
+.type-user_story { background: #8b5cf6; }
+.type-requirement { background: #58a6ff; }
+.type-spike { background: #d29922; }
+.type-chore { background: #545d6c; }
+.type-epic { background: #3fb950; }
 .card-swipe-hint {
   font-size: 11px; color: var(--text-dim); text-align: center;
   padding: 2px; opacity: 0; transition: opacity 0.2s;
@@ -557,6 +567,16 @@ body {
       <option value="medium">Medium</option>
       <option value="low">Low</option>
     </select>
+    <select id="type-filter">
+      <option value="all">All Types</option>
+      <option value="task">Tasks</option>
+      <option value="bug">Bugs</option>
+      <option value="user_story">User Stories</option>
+      <option value="requirement">Requirements</option>
+      <option value="spike">Spikes</option>
+      <option value="chore">Chores</option>
+      <option value="epic">Epics</option>
+    </select>
     <button class="btn" id="btn-logout-mobile" style="font-size:12px;color:var(--text-muted);padding:7px 12px;min-height:36px;">Sign Out</button>
   </div>
 
@@ -709,7 +729,7 @@ var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
    STATE
    ================================================================ */
 var allItems = [], allProjects = [], allLabels = [];
-var currentProject = 'all', searchQuery = '', priorityFilter = 'all';
+var currentProject = 'all', searchQuery = '', priorityFilter = 'all', typeFilter = 'all';
 var editingItem = null;
 var activeTab = 'backlog';
 var weekStart = null; /* set in INIT after getMonday is defined */
@@ -885,6 +905,7 @@ function filterItems() {
   return allItems.filter(function(item) {
     if (currentProject !== 'all' && item.project_id !== currentProject) return false;
     if (priorityFilter !== 'all' && item.priority !== priorityFilter) return false;
+    if (typeFilter !== 'all' && item.type !== typeFilter) return false;
     if (searchQuery) {
       var q = searchQuery.toLowerCase();
       if ((item.title||'').toLowerCase().indexOf(q) === -1 &&
@@ -967,8 +988,15 @@ function buildCardHTML(item, prevLabel, nextLabel) {
   var html = '<div class="card" data-id="' + item.id + '">';
   html += '<div class="swipe-action left">' + (prevLabel ? '&#x25C0; ' + esc(prevLabel) : '') + '</div>';
   html += '<div class="swipe-action right">' + (nextLabel ? esc(nextLabel) + ' &#x25B6;' : '') + '</div>';
+  var typeHtml = '';
+  if (item.type && item.type !== 'task') {
+    var typeIcons = {bug:'🐛',user_story:'📖',requirement:'📋',spike:'🔍',chore:'🧹',epic:'🏔️'};
+    var typeLabels = {bug:'bug',user_story:'story',requirement:'req',spike:'spike',chore:'chore',epic:'epic'};
+    typeHtml = '<span class="card-type-badge type-' + item.type + '">' + (typeIcons[item.type]||'') + ' ' + (typeLabels[item.type]||item.type) + '</span>';
+  }
+
   html += '<div class="card-inner">';
-  html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>';
+  html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>' + typeHtml;
   html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span>';
   html += assigneeHtml + '</div>';
   if (labels) html += '<div class="card-labels">' + labels + '</div>';
@@ -1144,8 +1172,14 @@ function renderDesktopBoard() {
         dueHtml = '<span class="card-due' + (isOverdue ? ' overdue' : '') + '">&#128197; ' + item.due_date + '</span>';
       }
       var commentHtml = item.comment_count > 0 ? '<span class="card-comments">&#128172; ' + item.comment_count + '</span>' : '';
+      var typeHtml = '';
+      if (item.type && item.type !== 'task') {
+        var typeIcons = {bug:'🐛',user_story:'📖',requirement:'📋',spike:'🔍',chore:'🧹',epic:'🏔️'};
+        var typeLabels = {bug:'bug',user_story:'story',requirement:'req',spike:'spike',chore:'chore',epic:'epic'};
+        typeHtml = '<span class="card-type-badge type-' + item.type + '">' + (typeIcons[item.type]||'') + ' ' + (typeLabels[item.type]||item.type) + '</span>';
+      }
       html += '<div class="card" draggable="true" data-id="' + item.id + '">';
-      html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '"></span>';
+      html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '"></span>' + typeHtml;
       html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span></div>';
       if (labels) html += '<div class="card-labels">' + labels + '</div>';
       html += '<div class="card-title">' + esc(item.title) + '</div>';
@@ -1437,6 +1471,11 @@ document.getElementById('project-select').addEventListener('change', function() 
 });
 document.getElementById('priority-filter').addEventListener('change', function() {
   priorityFilter = this.value;
+  renderMobileList();
+  renderDesktopBoard();
+});
+document.getElementById('type-filter').addEventListener('change', function() {
+  typeFilter = this.value;
   renderMobileList();
   renderDesktopBoard();
 });
