@@ -280,6 +280,13 @@ body {
   font-size: 11px; color: var(--text-dim); text-align: center;
   padding: 2px; opacity: 0; transition: opacity 0.2s;
 }
+.card-parent { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-progress-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.card-progress { height: 4px; background: var(--card-border); border-radius: 2px; overflow: hidden; flex: 1; max-width: 120px; }
+.card-progress-fill { height: 100%; background: var(--accent-green); border-radius: 2px; transition: width 0.2s; }
+.card-progress-text { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.card-blocked { font-size: 10px; font-weight: 600; color: var(--accent-red); display: inline-flex; align-items: center; gap: 2px; }
+.card.is-blocked { opacity: 0.7; }
 
 /* Empty column state */
 .empty-column {
@@ -985,7 +992,25 @@ function buildCardHTML(item, prevLabel, nextLabel) {
   var assigneeHtml = item.assignee ? '<span class="card-assignee">' + esc(item.assignee) + '</span>' : '';
   var descHtml = item.description ? '<div class="card-description">' + esc(item.description) + '</div>' : '';
 
-  var html = '<div class="card" data-id="' + item.id + '">';
+  var blockedHtml = '';
+  var blockedClass = '';
+  if (item.blocked_by_count > 0) {
+    blockedHtml = '<span class="card-blocked">🚫 blocked</span>';
+    blockedClass = ' is-blocked';
+  }
+  var parentHtml = '';
+  if (item.parent_title) {
+    parentHtml = '<div class="card-parent">↑ ' + esc(item.parent_title) + '</div>';
+  }
+  var progressHtml = '';
+  if (item.child_count > 0) {
+    var pct = Math.round((item.completed_child_count / item.child_count) * 100);
+    progressHtml = '<div class="card-progress-row">' +
+      '<div class="card-progress"><div class="card-progress-fill" style="width:' + pct + '%"></div></div>' +
+      '<span class="card-progress-text">' + item.completed_child_count + '/' + item.child_count + ' subtasks</span></div>';
+  }
+
+  var html = '<div class="card' + blockedClass + '" data-id="' + item.id + '">';
   html += '<div class="swipe-action left">' + (prevLabel ? '&#x25C0; ' + esc(prevLabel) : '') + '</div>';
   html += '<div class="swipe-action right">' + (nextLabel ? esc(nextLabel) + ' &#x25B6;' : '') + '</div>';
   var typeHtml = '';
@@ -996,13 +1021,14 @@ function buildCardHTML(item, prevLabel, nextLabel) {
   }
 
   html += '<div class="card-inner">';
-  html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>' + typeHtml;
+  html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>' + typeHtml + blockedHtml;
   html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span>';
   html += assigneeHtml + '</div>';
   if (labels) html += '<div class="card-labels">' + labels + '</div>';
+  html += parentHtml;
   html += '<div class="card-title">' + esc(item.title) + '</div>';
   html += descHtml;
-  if (dueHtml || commentHtml) html += '<div class="card-footer">' + dueHtml + commentHtml + '</div>';
+  if (dueHtml || commentHtml || progressHtml) html += '<div class="card-footer">' + dueHtml + commentHtml + '</div>' + progressHtml;
   html += '</div></div>';
   return html;
 }
@@ -1178,12 +1204,30 @@ function renderDesktopBoard() {
         var typeLabels = {bug:'bug',user_story:'story',requirement:'req',spike:'spike',chore:'chore',epic:'epic'};
         typeHtml = '<span class="card-type-badge type-' + item.type + '">' + (typeIcons[item.type]||'') + ' ' + (typeLabels[item.type]||item.type) + '</span>';
       }
-      html += '<div class="card" draggable="true" data-id="' + item.id + '">';
-      html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '"></span>' + typeHtml;
+      var dBlockedHtml = '';
+      var dBlockedClass = '';
+      if (item.blocked_by_count > 0) {
+        dBlockedHtml = '<span class="card-blocked">🚫 blocked</span>';
+        dBlockedClass = ' is-blocked';
+      }
+      var dParentHtml = '';
+      if (item.parent_title) {
+        dParentHtml = '<div class="card-parent">↑ ' + esc(item.parent_title) + '</div>';
+      }
+      var dProgressHtml = '';
+      if (item.child_count > 0) {
+        var dPct = Math.round((item.completed_child_count / item.child_count) * 100);
+        dProgressHtml = '<div class="card-progress-row">' +
+          '<div class="card-progress"><div class="card-progress-fill" style="width:' + dPct + '%"></div></div>' +
+          '<span class="card-progress-text">' + item.completed_child_count + '/' + item.child_count + ' subtasks</span></div>';
+      }
+      html += '<div class="card' + dBlockedClass + '" draggable="true" data-id="' + item.id + '">';
+      html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '"></span>' + typeHtml + dBlockedHtml;
       html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span></div>';
       if (labels) html += '<div class="card-labels">' + labels + '</div>';
+      html += dParentHtml;
       html += '<div class="card-title">' + esc(item.title) + '</div>';
-      if (dueHtml || commentHtml) html += '<div class="card-footer">' + dueHtml + commentHtml + '</div>';
+      if (dueHtml || commentHtml || dProgressHtml) html += '<div class="card-footer">' + dueHtml + commentHtml + '</div>' + dProgressHtml;
       html += '</div>';
     });
     html += '<button class="add-card-btn" data-status="' + st + '">+ Add card</button>';
