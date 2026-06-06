@@ -2291,7 +2291,21 @@ function renderProjectStrip() {
 function renderHeroCard() {
   var el = document.getElementById('j-narrative');
   var b = jarvisData.briefing && jarvisData.briefing[0];
-  if (b && b.narrative_summary) {
+  if (!b) {
+    el.textContent = 'No briefing generated yet. Ask JARVIS to run the daily delta.';
+    el.classList.add('empty');
+    return;
+  }
+  if (jarvisDomainFilter !== 'all') {
+    var domainText = b.domain_summaries && b.domain_summaries[jarvisDomainFilter];
+    if (domainText) {
+      el.textContent = domainText;
+      el.classList.remove('empty');
+    } else {
+      el.textContent = 'No briefing available for this domain.';
+      el.classList.add('empty');
+    }
+  } else if (b.narrative_summary) {
     el.textContent = b.narrative_summary;
     el.classList.remove('empty');
   } else {
