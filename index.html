@@ -2203,6 +2203,9 @@ async function loadJarvisData() {
     jarvisData.jobs = r[2].ok ? await r[2].json() : [];
     jarvisData.unack = r[3].ok ? await r[3].json() : [];
     jarvisData.stale = r[4].ok ? await r[4].json() : [];
+    /* job_applications don't join projects — hardcode domain to 'career' */
+    jarvisData.jobs.forEach(function(j) { if (!j.project_domain) j.project_domain = 'career'; });
+    jarvisData.stale.forEach(function(j) { if (!j.project_domain) j.project_domain = 'career'; });
     jarvisData.snoozedToday = r[5].ok ? await r[5].json() : [];
     jarvisSnoozedItems = r[6].ok ? await r[6].json() : [];
     jarvisData.completed = r[7].ok ? await r[7].json() : [];
@@ -2261,7 +2264,7 @@ function renderJarvisHeader() {
 
 function renderProjectStrip() {
   var strip = document.getElementById('j-project-strip');
-  var all = [].concat(jarvisData.changed || [], jarvisData.completed || [], jarvisData.pending || [], jarvisData.unack || []);
+  var all = jFilterDomain([].concat(jarvisData.changed || [], jarvisData.completed || [], jarvisData.pending || [], jarvisData.unack || []));
   var pm = {};
   all.forEach(function(i) {
     var k = i.project_key || i.project_id || 'UNK';
@@ -2347,7 +2350,7 @@ function renderStatDrillDown() {
   switch (jarvisStatFilter) {
     case 'completed': items = jFilter(jarvisData.completed || []); break;
     case 'changed': items = jFilter(jarvisData.changed || []); break;
-    case 'decisions': items = jarvisData.decisions || []; break;
+    case 'decisions': items = jFilter(jarvisData.decisions || []); break;
     case 'flagged': items = jFilter([].concat(jarvisData.pending || [], jarvisData.unack || [])); break;
   }
 
