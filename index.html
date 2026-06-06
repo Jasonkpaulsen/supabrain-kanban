@@ -15,6 +15,9 @@
 <link rel="apple-touch-icon" href="kanban-icon.svg">
 <link rel="icon" type="image/svg+xml" href="kanban-icon.svg">
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* ================================================================
@@ -98,7 +101,7 @@ body {
 .header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px;
-  padding-top: calc(10px + var(--sai-top));
+  padding-top: 10px;
   border-bottom: 1px solid var(--divider); background: var(--surface);
   flex-shrink: 0; z-index: 100; min-height: var(--header-height);
 }
@@ -531,10 +534,464 @@ body {
 .btn-logout-desktop { display: none !important; }
 
 /* ================================================================
+   JARVIS DASHBOARD
+   ================================================================ */
+:root {
+  --j-cyan: #58a6ff;
+  --j-cyan-dim: rgba(88,166,255,0.12);
+  --j-cyan-glow: rgba(88,166,255,0.25);
+  --j-amber: #d29922;
+  --j-green: #3fb950;
+  --j-red: #f85149;
+  --j-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Top Navigation Tabs */
+.top-tabs {
+  display: flex; background: var(--surface);
+  border-bottom: 1px solid var(--divider); flex-shrink: 0;
+  padding-top: var(--sai-top); z-index: 101;
+}
+.top-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 12px 0 10px; background: none; border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim); font-family: var(--j-mono);
+  font-size: 13px; font-weight: 600; letter-spacing: 1.5px;
+  cursor: pointer; transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.top-tab.active { color: var(--j-cyan); border-bottom-color: var(--j-cyan); }
+
+/* JARVIS View */
+#jarvis-view {
+  display: none; flex-direction: column; flex: 1;
+  overflow: hidden; position: relative;
+}
+#jarvis-view::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(88,166,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(88,166,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px; pointer-events: none; z-index: 0;
+}
+#app.jarvis-active #jarvis-view { display: flex; }
+#app.jarvis-active .header,
+#app.jarvis-active .filters-panel,
+#app.jarvis-active .week-strip,
+#app.jarvis-active #loading,
+#app.jarvis-active .card-list-container,
+#app.jarvis-active .desktop-board,
+#app.jarvis-active .tab-bar,
+#app.jarvis-active .fab { display: none !important; }
+
+/* JARVIS Header */
+.j-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; flex-shrink: 0; position: relative; z-index: 1;
+}
+.j-header-left { display: flex; align-items: center; gap: 12px; }
+.j-today-badge {
+  font-family: var(--j-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 2px; color: #fff;
+  background: linear-gradient(90deg, var(--j-cyan), var(--accent-purple));
+  padding: 4px 12px; border-radius: 4px; position: relative; overflow: hidden;
+}
+.j-today-badge::after {
+  content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  animation: jScanLine 3s linear infinite;
+}
+@keyframes jScanLine { 0% { left: -100%; } 100% { left: 100%; } }
+.j-date {
+  font-family: var(--j-mono); font-size: 11px; color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+.j-header-right { display: flex; align-items: center; gap: 10px; }
+.j-status {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 1px; color: var(--j-green);
+  display: flex; align-items: center; gap: 6px;
+}
+.j-status::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--j-green); box-shadow: 0 0 6px var(--j-green);
+}
+.j-bell-btn {
+  background: none; border: 1px solid var(--card-border); border-radius: 8px;
+  padding: 6px 10px; font-size: 16px; cursor: pointer; position: relative;
+  color: var(--text); -webkit-tap-highlight-color: transparent;
+}
+.j-bell-count {
+  position: absolute; top: -5px; right: -5px;
+  background: var(--j-red); color: #fff; font-family: var(--j-mono);
+  font-size: 9px; font-weight: 700; min-width: 16px; height: 16px;
+  border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; padding: 0 3px;
+}
+.j-bell-count.hidden { display: none; }
+
+/* Domain pills */
+.j-domain-pills {
+  display: flex; gap: 6px; padding: 0 16px 10px; flex-shrink: 0;
+  position: relative; z-index: 1; overflow-x: auto;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.j-domain-pills::-webkit-scrollbar { display: none; }
+.j-pill {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.8px; padding: 5px 12px; border-radius: 4px;
+  border: 1px solid var(--card-border); background: transparent;
+  color: var(--text-dim); cursor: pointer; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent; white-space: nowrap; flex-shrink: 0;
+}
+.j-pill.active {
+  border-color: var(--j-cyan); color: var(--j-cyan); background: var(--j-cyan-dim);
+}
+
+/* Scrollable content */
+.j-scroll {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 16px 16px;
+  padding-bottom: calc(16px + var(--sai-bottom));
+  overscroll-behavior-y: contain; position: relative; z-index: 1;
+}
+
+/* Project strip */
+.j-project-strip {
+  display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 12px;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.j-project-strip::-webkit-scrollbar { display: none; }
+.j-project-chip {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border: 1px solid var(--card-border); border-radius: 8px;
+  background: var(--card-bg); white-space: nowrap; cursor: pointer;
+  font-size: 12px; color: var(--text); flex-shrink: 0; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-project-chip.active { border-color: var(--j-cyan); background: var(--j-cyan-dim); }
+.j-chip-count {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 700;
+  background: rgba(88,166,255,0.15); color: var(--j-cyan);
+  padding: 1px 6px; border-radius: 4px;
+}
+
+/* Hero card */
+.j-hero {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 12px; padding: 20px; margin-bottom: 16px;
+  position: relative; overflow: hidden;
+}
+.j-hero::before {
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 24px; height: 24px;
+  border-top: 2px solid var(--j-cyan); border-left: 2px solid var(--j-cyan);
+  opacity: 0.6;
+}
+.j-hero::after {
+  content: ''; position: absolute; bottom: 0; right: 0;
+  width: 24px; height: 24px;
+  border-bottom: 2px solid var(--j-cyan); border-right: 2px solid var(--j-cyan);
+  opacity: 0.6;
+}
+.j-hero-inner { position: relative; z-index: 1; }
+#j-narrative { font-size: 14px; line-height: 1.6; color: var(--text); }
+#j-narrative.empty { color: var(--text-dim); font-style: italic; }
+
+/* Stat gauges */
+.j-gauges {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 10px; margin-bottom: 20px; position: relative; padding: 4px;
+}
+.j-gauges::before {
+  content: ''; position: absolute; top: 0; left: 0;
+  width: 16px; height: 16px;
+  border-top: 1px solid var(--j-cyan); border-left: 1px solid var(--j-cyan);
+  opacity: 0.4; pointer-events: none;
+}
+.j-gauges::after {
+  content: ''; position: absolute; bottom: 0; right: 0;
+  width: 16px; height: 16px;
+  border-bottom: 1px solid var(--j-cyan); border-right: 1px solid var(--j-cyan);
+  opacity: 0.4; pointer-events: none;
+}
+.j-gauge {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 12px 4px; background: var(--card-bg);
+  border: 1px solid var(--card-border); border-radius: 10px;
+}
+.j-gauge svg { margin-bottom: 4px; }
+.j-gauge-value {
+  font-family: var(--j-mono); font-size: 20px; font-weight: 700; line-height: 1;
+}
+.j-gauge-label {
+  font-family: var(--j-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.5px; color: var(--text-dim); margin-top: 4px;
+  text-transform: uppercase;
+}
+
+/* Sections */
+.j-section { margin-bottom: 20px; }
+.j-section-header {
+  font-family: var(--j-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 1.5px; color: var(--j-cyan); padding-bottom: 8px;
+  margin-bottom: 10px; border-bottom: 1px solid;
+  border-image: linear-gradient(90deg, var(--j-cyan), transparent) 1;
+}
+.j-section-empty {
+  font-size: 13px; color: var(--text-dim); padding: 16px 0; text-align: center;
+}
+
+/* JARVIS cards */
+.j-card {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+  cursor: pointer; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-card:active { background: #242b3d; }
+.j-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.j-card-code { font-family: var(--j-mono); font-size: 11px; color: var(--text-dim); }
+.j-card-project {
+  font-size: 10px; color: var(--text-dim); background: var(--surface);
+  padding: 2px 6px; border-radius: 4px; border: 1px solid var(--card-border);
+}
+.j-card-category {
+  font-family: var(--j-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px;
+  color: #fff; text-transform: uppercase;
+}
+.j-cat-approval { background: var(--accent-purple); }
+.j-cat-job { background: #2dd4bf; }
+.j-cat-attention { background: var(--j-amber); }
+.j-cat-stale { background: var(--j-red); }
+.j-cat-snoozed { background: var(--accent-blue); }
+.j-cat-completed { background: var(--j-green); }
+.j-cat-updated { background: var(--accent-blue); }
+.j-card-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.j-card-subtitle {
+  font-size: 12px; color: var(--text-muted); margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Recommendations */
+.j-rec-item {
+  display: flex; gap: 12px; padding: 10px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+.j-rec-item:last-child { border-bottom: none; }
+.j-rec-num {
+  font-family: var(--j-mono); font-size: 14px; font-weight: 700;
+  color: var(--j-cyan); flex-shrink: 0; width: 24px;
+}
+.j-rec-text { font-size: 14px; line-height: 1.5; color: var(--text); }
+
+/* Highlights accordion */
+.j-accordion { margin-bottom: 8px; }
+.j-accordion-header {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500;
+  color: var(--text); -webkit-tap-highlight-color: transparent;
+}
+.j-accordion-arrow {
+  margin-left: auto; transition: transform 0.2s; color: var(--text-dim);
+  font-size: 12px;
+}
+.j-accordion.open .j-accordion-arrow { transform: rotate(90deg); }
+.j-accordion-count {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 700;
+  background: var(--j-cyan-dim); color: var(--j-cyan);
+  padding: 1px 6px; border-radius: 4px;
+}
+.j-accordion-body { display: none; padding: 4px 0 0 0; }
+.j-accordion.open .j-accordion-body { display: block; }
+
+/* Day navigation */
+.j-day-nav {
+  display: flex; justify-content: center; gap: 6px;
+  padding: 16px 0 8px; position: relative; z-index: 1;
+}
+.j-day-pill {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 8px 8px 6px; border: 1px solid var(--card-border);
+  border-radius: 8px; background: var(--card-bg); cursor: pointer;
+  min-width: 38px; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-day-pill.active {
+  border-color: var(--j-cyan); background: var(--j-cyan-dim);
+  box-shadow: 0 0 12px var(--j-cyan-glow);
+}
+.j-day-name {
+  font-family: var(--j-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.3px; color: var(--text-dim); text-transform: uppercase;
+}
+.j-day-pill.active .j-day-name { color: var(--j-cyan); }
+.j-day-num { font-family: var(--j-mono); font-size: 14px; font-weight: 700; color: var(--text); }
+.j-day-dots { display: flex; gap: 2px; min-height: 5px; }
+.j-day-dot {
+  width: 3px; height: 3px; border-radius: 50%; background: var(--text-dim);
+}
+.j-day-dot.active { background: var(--j-cyan); }
+
+/* Detail panel (bottom sheet mobile) */
+.j-detail-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6); z-index: 1100;
+}
+.j-detail-overlay.active { display: block; }
+.j-detail-panel {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 80vh;
+  background: var(--surface); border-radius: 16px 16px 0 0;
+  display: flex; flex-direction: column; z-index: 1101;
+  transform: translateY(100%); transition: transform 0.3s ease;
+}
+.j-detail-overlay.active .j-detail-panel { transform: translateY(0); }
+.j-detail-handle {
+  width: 36px; height: 4px; background: var(--card-border);
+  border-radius: 2px; margin: 10px auto 6px; flex-shrink: 0;
+}
+.j-detail-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px 12px; border-bottom: 1px solid var(--divider); flex-shrink: 0;
+}
+.j-detail-close {
+  margin-left: auto; background: none; border: none; color: var(--text-muted);
+  font-size: 22px; cursor: pointer; width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center; border-radius: 8px;
+}
+.j-detail-close:active { background: var(--card-bg); }
+.j-detail-body {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 16px; padding-bottom: calc(16px + var(--sai-bottom));
+}
+.j-detail-priority-row { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.j-priority-pill {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.5px; padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--card-border); background: transparent;
+  color: var(--text-dim); cursor: pointer; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-priority-pill.active { border-color: currentColor; }
+.j-priority-pill[data-p="critical"].active { color: var(--j-red); background: rgba(248,81,73,0.1); }
+.j-priority-pill[data-p="high"].active { color: var(--j-amber); background: rgba(210,153,34,0.1); }
+.j-priority-pill[data-p="medium"].active { color: var(--j-cyan); background: var(--j-cyan-dim); }
+.j-priority-pill[data-p="low"].active { color: var(--text-muted); background: rgba(139,148,158,0.1); }
+.j-detail-title {
+  font-size: 18px; font-weight: 600; margin-bottom: 12px; line-height: 1.4;
+}
+.j-detail-desc {
+  font-size: 14px; line-height: 1.6; color: var(--text-muted); margin-bottom: 16px;
+}
+.j-detail-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.j-action-btn {
+  font-family: var(--j-mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.5px; padding: 10px 20px; border-radius: 8px;
+  border: none; cursor: pointer; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-action-btn:active { transform: scale(0.96); }
+.j-action-approve { background: var(--j-green); color: #fff; }
+.j-action-reject { background: var(--j-red); color: #fff; }
+.j-action-ack { background: var(--j-cyan); color: #fff; }
+.j-action-snooze { background: var(--card-bg); color: var(--text); border: 1px solid var(--card-border) !important; }
+.j-action-close-item { background: var(--card-bg); color: var(--text); border: 1px solid var(--card-border) !important; }
+.j-detail-link {
+  font-family: var(--j-mono); font-size: 12px; color: var(--j-cyan);
+  background: none; border: none; cursor: pointer; padding: 8px 0;
+  text-decoration: underline;
+}
+.j-snooze-row {
+  display: none; align-items: center; gap: 8px; margin-top: 8px;
+}
+.j-snooze-row.visible { display: flex; }
+.j-snooze-row input[type="date"] {
+  background: var(--bg); border: 1px solid var(--card-border);
+  border-radius: 8px; color: var(--text); padding: 8px 12px;
+  font-size: 14px; outline: none; -webkit-appearance: none;
+}
+
+/* Bell tray */
+.j-bell-tray-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); z-index: 1199;
+}
+.j-bell-tray-overlay.active { display: block; }
+.j-bell-tray {
+  display: none; position: fixed; top: 0; right: 0;
+  width: 100%; max-width: 360px; height: 100%;
+  background: var(--surface); border-left: 1px solid var(--divider);
+  z-index: 1200; flex-direction: column;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+}
+.j-bell-tray.active { display: flex; }
+.j-bell-tray-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px; padding-top: calc(16px + var(--sai-top));
+  border-bottom: 1px solid var(--divider); flex-shrink: 0;
+}
+.j-bell-tray-header h3 {
+  font-family: var(--j-mono); font-size: 12px; font-weight: 700;
+  letter-spacing: 1px; color: var(--j-cyan);
+}
+.j-bell-tray-close {
+  background: none; border: none; color: var(--text-muted); font-size: 22px;
+  cursor: pointer; width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+}
+.j-bell-tray-body {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 16px;
+}
+.j-bell-item {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+}
+.j-bell-item-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.j-bell-item-meta {
+  font-size: 12px; color: var(--text-dim); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.j-bell-item-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.j-bell-action {
+  font-family: var(--j-mono); font-size: 10px; font-weight: 600;
+  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--card-border);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.j-bell-action.primary { border-color: var(--j-cyan); color: var(--j-cyan); }
+.j-bell-action.danger { border-color: var(--j-red); color: var(--j-red); }
+
+/* Desktop overrides for JARVIS */
+@media (min-width: 769px) {
+  .j-detail-overlay.active { display: flex; justify-content: flex-end; }
+  .j-detail-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; left: auto;
+    width: 380px; height: 100%; border-radius: 0;
+    border-left: 1px solid var(--divider);
+    transform: translateX(100%);
+  }
+  .j-detail-overlay.active .j-detail-panel { transform: translateX(0); }
+  .j-detail-handle { display: none; }
+  .j-bell-tray {
+    max-width: 360px; top: 60px; right: 16px;
+    height: auto; max-height: 500px; border-radius: 12px;
+    border: 1px solid var(--card-border);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .j-bell-tray-header { padding-top: 16px; }
+  .j-gauges { gap: 16px; }
+}
+
+/* ================================================================
    STANDALONE MODE TWEAKS (added to home screen)
    ================================================================ */
 @media (display-mode: standalone) {
-  .header { padding-top: calc(12px + var(--sai-top)); }
+  .header { padding-top: 12px; }
 }
 </style>
 </head>
@@ -556,6 +1013,12 @@ body {
 
 <!-- App -->
 <div id="app">
+  <!-- Top Navigation -->
+  <div class="top-tabs">
+    <button class="top-tab active" id="top-tab-board">BOARD</button>
+    <button class="top-tab" id="top-tab-jarvis">JARVIS</button>
+  </div>
+
   <!-- Header -->
   <div class="header">
     <div class="header-left">
@@ -634,6 +1097,52 @@ body {
     <div class="column col-done" data-status="done">
       <div class="column-header"><span class="column-title">Done</span><span class="column-count" id="dcount-done">0</span></div>
       <div class="column-body" id="dcol-done"></div>
+    </div>
+  </div>
+
+  <!-- JARVIS Dashboard View -->
+  <div id="jarvis-view">
+    <div class="j-header">
+      <div class="j-header-left">
+        <span class="j-today-badge">TODAY</span>
+        <span class="j-date" id="j-date"></span>
+      </div>
+      <div class="j-header-right">
+        <span class="j-status">SYSTEMS NOMINAL</span>
+        <button class="j-bell-btn" id="j-bell-btn">&#x1F514;<span class="j-bell-count hidden" id="j-bell-count">0</span></button>
+      </div>
+    </div>
+    <div class="j-domain-pills" id="j-domain-pills">
+      <button class="j-pill active" data-domain="all">ALL</button>
+      <button class="j-pill" data-domain="professional">PROFESSIONAL</button>
+      <button class="j-pill" data-domain="personal">PERSONAL</button>
+      <button class="j-pill" data-domain="family">FAMILY</button>
+    </div>
+    <div class="j-scroll" id="j-scroll">
+      <div class="j-project-strip" id="j-project-strip"></div>
+      <div class="j-hero">
+        <div class="j-hero-inner">
+          <p id="j-narrative" class="empty">No briefing generated yet. Ask JARVIS to run the daily delta.</p>
+        </div>
+      </div>
+      <div class="j-gauges" id="j-gauges"></div>
+      <div class="j-section">
+        <div class="j-section-header">PRIORITY ITEMS</div>
+        <div class="j-section-body" id="j-priority-items"><div class="j-section-empty">Loading...</div></div>
+      </div>
+      <div class="j-section">
+        <div class="j-section-header">ATTENTION REQUIRED</div>
+        <div class="j-section-body" id="j-attention-items"><div class="j-section-empty">Loading...</div></div>
+      </div>
+      <div class="j-section">
+        <div class="j-section-header">HIGHLIGHTS</div>
+        <div class="j-section-body" id="j-highlights"><div class="j-section-empty">Loading...</div></div>
+      </div>
+      <div class="j-section">
+        <div class="j-section-header">RECOMMENDED ACTIONS</div>
+        <div class="j-section-body" id="j-recommendations"><div class="j-section-empty">Loading...</div></div>
+      </div>
+      <div class="j-day-nav" id="j-day-nav"></div>
     </div>
   </div>
 
@@ -728,6 +1237,29 @@ body {
       </div>
     </div>
   </div>
+</div>
+
+<!-- JARVIS Detail Panel -->
+<div class="j-detail-overlay" id="j-detail-overlay">
+  <div class="j-detail-panel">
+    <div class="j-detail-handle"></div>
+    <div class="j-detail-header">
+      <span class="j-card-category j-cat-approval" id="j-detail-cat"></span>
+      <span class="j-card-project" id="j-detail-project"></span>
+      <button class="j-detail-close" id="j-detail-close">&times;</button>
+    </div>
+    <div class="j-detail-body" id="j-detail-body"></div>
+  </div>
+</div>
+
+<!-- JARVIS Bell Tray -->
+<div class="j-bell-tray-overlay" id="j-bell-tray-overlay"></div>
+<div class="j-bell-tray" id="j-bell-tray">
+  <div class="j-bell-tray-header">
+    <h3>SNOOZED ITEMS</h3>
+    <button class="j-bell-tray-close" id="j-bell-tray-close">&times;</button>
+  </div>
+  <div class="j-bell-tray-body" id="j-bell-tray-body"></div>
 </div>
 
 <script>
@@ -1464,7 +1996,6 @@ document.getElementById('btn-save-modal').addEventListener('click', async functi
   };
   var selectedLabels = [];
   document.querySelectorAll('#m-labels .label-chip.selected').forEach(function(c) { selectedLabels.push(c.dataset.id); });
-
   try {
     var h = await getHeaders();
     var itemId;
@@ -1570,6 +2101,570 @@ document.getElementById('btn-refresh').addEventListener('click', loadAll);
 if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
   document.documentElement.classList.add('standalone');
 }
+
+/* ================================================================
+   JARVIS DASHBOARD
+   ================================================================ */
+var jarvisActive = false;
+var jarvisData = {};
+var jarvisSelectedDate = new Date();
+var jarvisDomainFilter = 'all';
+var jarvisProjectFilter = null;
+var jarvisDetailItem = null;
+var jarvisSnoozedItems = [];
+
+/* Top tab switching */
+function switchToBoard() {
+  jarvisActive = false;
+  document.getElementById('app').classList.remove('jarvis-active');
+  document.getElementById('top-tab-board').classList.add('active');
+  document.getElementById('top-tab-jarvis').classList.remove('active');
+}
+function switchToJarvis() {
+  jarvisActive = true;
+  document.getElementById('app').classList.add('jarvis-active');
+  document.getElementById('top-tab-board').classList.remove('active');
+  document.getElementById('top-tab-jarvis').classList.add('active');
+  loadJarvisData();
+}
+document.getElementById('top-tab-board').addEventListener('click', switchToBoard);
+document.getElementById('top-tab-jarvis').addEventListener('click', switchToJarvis);
+
+/* Date helpers */
+function jDateStr(d) { return d.toISOString().slice(0, 10); }
+function jFormatDate(d) {
+  var days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  var months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  return days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + String(d.getDate()).padStart(2,'0') + ' ' + d.getFullYear();
+}
+
+/* Load all JARVIS data */
+async function loadJarvisData() {
+  try {
+    var h = await getHeaders();
+    var today = jDateStr(jarvisSelectedDate);
+    var dayStart = today + 'T00:00:00';
+    var dayEnd = today + 'T23:59:59';
+    var fourteenAgo = new Date(jarvisSelectedDate);
+    fourteenAgo.setDate(fourteenAgo.getDate() - 14);
+    var staleDate = jDateStr(fourteenAgo);
+
+    var fetches = [
+      fetch(SUPABASE_URL + '/rest/v1/jarvis_briefings?briefing_date=eq.' + today + '&select=*', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?approval_status=eq.pending&status=neq.done&order=priority.desc', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/job_applications?decision=eq.review&status=eq.new&order=score.desc&limit=20', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?acknowledged=eq.false&priority=in.(critical,high)&status=not.in.(done,backlog)&order=priority.desc', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/job_applications?status=eq.applied&applied_at=lt.' + staleDate + '&limit=20', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?snoozed_until=lte.' + today + '&snoozed_until=neq.&status=neq.done', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?snoozed_until=gt.' + today + '&status=neq.done', { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?status=eq.done&completed_at=gte.' + dayStart + '&completed_at=lte.' + dayEnd, { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/kanban_board_view?updated_at=gte.' + dayStart + '&updated_at=lte.' + dayEnd, { headers: h }).catch(function() { return { ok: false }; }),
+      fetch(SUPABASE_URL + '/rest/v1/decisions?created_at=gte.' + dayStart + '&created_at=lte.' + dayEnd + '&select=*', { headers: h }).catch(function() { return { ok: false }; })
+    ];
+    var r = await Promise.all(fetches);
+    jarvisData.briefing = r[0].ok ? await r[0].json() : [];
+    jarvisData.pending = r[1].ok ? await r[1].json() : [];
+    jarvisData.jobs = r[2].ok ? await r[2].json() : [];
+    jarvisData.unack = r[3].ok ? await r[3].json() : [];
+    jarvisData.stale = r[4].ok ? await r[4].json() : [];
+    jarvisData.snoozedToday = r[5].ok ? await r[5].json() : [];
+    jarvisSnoozedItems = r[6].ok ? await r[6].json() : [];
+    jarvisData.completed = r[7].ok ? await r[7].json() : [];
+    jarvisData.changed = r[8].ok ? await r[8].json() : [];
+    jarvisData.decisions = r[9].ok ? await r[9].json() : [];
+    renderJarvisDashboard();
+  } catch (err) {
+    toast('JARVIS load error: ' + err.message, 'error');
+  }
+}
+
+/* Filters */
+function jFilterDomain(items) {
+  if (jarvisDomainFilter === 'all') return items;
+  return items.filter(function(i) {
+    return (i.project_domain || i.domain || '').toLowerCase() === jarvisDomainFilter;
+  });
+}
+function jFilterProject(items) {
+  if (!jarvisProjectFilter) return items;
+  return items.filter(function(i) {
+    return i.project_key === jarvisProjectFilter || i.project_id === jarvisProjectFilter;
+  });
+}
+function jFilter(items) { return jFilterProject(jFilterDomain(items)); }
+
+/* Master render */
+function renderJarvisDashboard() {
+  renderJarvisHeader();
+  renderProjectStrip();
+  renderHeroCard();
+  renderStatGauges();
+  renderPriorityItems();
+  renderAttentionItems();
+  renderHighlights();
+  renderRecommendations();
+  renderDayNav();
+  renderBellCount();
+}
+
+function renderJarvisHeader() {
+  document.getElementById('j-date').textContent = jFormatDate(jarvisSelectedDate);
+}
+
+function renderProjectStrip() {
+  var strip = document.getElementById('j-project-strip');
+  var all = [].concat(jarvisData.changed || [], jarvisData.completed || [], jarvisData.pending || [], jarvisData.unack || []);
+  var pm = {};
+  all.forEach(function(i) {
+    var k = i.project_key || i.project_id || 'UNK';
+    if (!pm[k]) pm[k] = { key: k, name: i.project_name || k, icon: i.project_icon || '', count: 0 };
+    pm[k].count++;
+  });
+  var ps = Object.values(pm).sort(function(a, b) { return b.count - a.count; });
+  if (!ps.length) { strip.innerHTML = '<span style="font-size:12px;color:var(--text-dim);padding:8px 0">No project activity</span>'; return; }
+  var html = '';
+  ps.forEach(function(p) {
+    html += '<div class="j-project-chip' + (jarvisProjectFilter === p.key ? ' active' : '') + '" data-project="' + esc(p.key) + '">';
+    html += esc(p.icon) + ' ' + esc(p.key) + ' <span class="j-chip-count">' + p.count + '</span></div>';
+  });
+  strip.innerHTML = html;
+  strip.querySelectorAll('.j-project-chip').forEach(function(c) {
+    c.addEventListener('click', function() {
+      jarvisProjectFilter = jarvisProjectFilter === c.dataset.project ? null : c.dataset.project;
+      renderJarvisDashboard();
+    });
+  });
+}
+
+function renderHeroCard() {
+  var el = document.getElementById('j-narrative');
+  var b = jarvisData.briefing && jarvisData.briefing[0];
+  if (b && b.narrative_summary) {
+    el.textContent = b.narrative_summary;
+    el.classList.remove('empty');
+  } else {
+    el.textContent = 'No briefing generated yet. Ask JARVIS to run the daily delta.';
+    el.classList.add('empty');
+  }
+}
+
+function buildGaugeSVG(value, maxVal, color) {
+  var s = 56, r = 22, cx = 28, cy = 28;
+  var circ = 2 * Math.PI * r;
+  var pct = maxVal > 0 ? Math.min(value / maxVal, 1) : 0;
+  var dash = circ * pct, gap = circ - dash;
+  return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 ' + s + ' ' + s + '">' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="3" ' +
+    'stroke-dasharray="' + dash.toFixed(1) + ' ' + gap.toFixed(1) + '" stroke-linecap="round" ' +
+    'transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition:stroke-dasharray 0.6s ease"/></svg>';
+}
+
+function renderStatGauges() {
+  var completed = (jarvisData.completed || []).length;
+  var changed = (jarvisData.changed || []).length;
+  var decisions = (jarvisData.decisions || []).length;
+  var flagged = (jarvisData.pending || []).length + (jarvisData.unack || []).length;
+  var mx = Math.max(completed, changed, decisions, flagged, 8);
+  var gauges = [
+    { v: completed, l: 'DONE', c: '#3fb950' },
+    { v: changed, l: 'CHANGED', c: '#58a6ff' },
+    { v: decisions, l: 'DECIDED', c: '#d29922' },
+    { v: flagged, l: 'FLAGGED', c: '#f85149' }
+  ];
+  var html = '';
+  gauges.forEach(function(g) {
+    html += '<div class="j-gauge">' + buildGaugeSVG(g.v, mx, g.c) +
+      '<span class="j-gauge-value" style="color:' + g.c + '">' + g.v + '</span>' +
+      '<span class="j-gauge-label">' + g.l + '</span></div>';
+  });
+  document.getElementById('j-gauges').innerHTML = html;
+}
+
+function buildJCard(item, cat, catClass) {
+  var html = '<div class="j-card" data-id="' + (item.id || '') + '" data-type="' + (item._jt || 'work_item') + '">';
+  html += '<div class="j-card-top">';
+  if (item.ticket_code) html += '<span class="j-card-code">' + esc(item.ticket_code) + '</span>';
+  html += '<span class="priority-dot priority-' + esc(item.priority || 'medium') + '"></span>';
+  html += '<span class="j-card-category j-cat-' + catClass + '">' + esc(cat) + '</span>';
+  if (item.project_name) html += '<span class="j-card-project">' + esc((item.project_icon||'') + ' ' + item.project_name) + '</span>';
+  html += '</div>';
+  html += '<div class="j-card-title">' + esc(item.title || item.job_title || item.company_name || 'Untitled') + '</div>';
+  var sub = item.description ? item.description.substring(0, 100) : (item.company_name || '');
+  if (sub) html += '<div class="j-card-subtitle">' + esc(sub) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderPriorityItems() {
+  var c = document.getElementById('j-priority-items');
+  var pending = jFilter(jarvisData.pending || []);
+  var jobs = jarvisData.jobs || [];
+  if (!pending.length && !jobs.length) { c.innerHTML = '<div class="j-section-empty">No priority items</div>'; return; }
+  var html = '';
+  pending.forEach(function(i) { i._jt = 'work_item'; html += buildJCard(i, 'APPROVAL', 'approval'); });
+  jobs.forEach(function(i) { i._jt = 'job'; html += buildJCard(i, 'JOB LEAD', 'job'); });
+  c.innerHTML = html;
+  bindJCardEvents(c);
+}
+
+function renderAttentionItems() {
+  var c = document.getElementById('j-attention-items');
+  var unack = jFilter(jarvisData.unack || []);
+  var stale = jarvisData.stale || [];
+  var snoozedToday = jFilter(jarvisData.snoozedToday || []);
+  if (!unack.length && !stale.length && !snoozedToday.length) { c.innerHTML = '<div class="j-section-empty">Nothing needs attention</div>'; return; }
+  var html = '';
+  unack.forEach(function(i) { i._jt = 'work_item'; html += buildJCard(i, 'UNACK', 'attention'); });
+  stale.forEach(function(i) { i._jt = 'job'; html += buildJCard(i, 'STALE', 'stale'); });
+  snoozedToday.forEach(function(i) { i._jt = 'work_item'; html += buildJCard(i, 'RETURNED', 'snoozed'); });
+  c.innerHTML = html;
+  bindJCardEvents(c);
+}
+
+function renderHighlights() {
+  var c = document.getElementById('j-highlights');
+  var items = jFilter([].concat(jarvisData.completed || [], jarvisData.changed || []));
+  var seen = {};
+  items = items.filter(function(i) { if (seen[i.id]) return false; seen[i.id] = true; return true; });
+  if (!items.length) { c.innerHTML = '<div class="j-section-empty">No highlights for this day</div>'; return; }
+  var groups = {};
+  items.forEach(function(i) {
+    var k = i.project_name || 'Other';
+    if (!groups[k]) groups[k] = { icon: i.project_icon || '', items: [] };
+    groups[k].items.push(i);
+  });
+  var html = '';
+  Object.keys(groups).forEach(function(name) {
+    var g = groups[name];
+    html += '<div class="j-accordion">';
+    html += '<div class="j-accordion-header">' + esc(g.icon) + ' ' + esc(name);
+    html += ' <span class="j-accordion-count">' + g.items.length + '</span>';
+    html += '<span class="j-accordion-arrow">&#x25B6;</span></div>';
+    html += '<div class="j-accordion-body">';
+    g.items.forEach(function(i) {
+      i._jt = 'work_item';
+      html += buildJCard(i, i.status === 'done' ? 'COMPLETED' : 'UPDATED', i.status === 'done' ? 'completed' : 'updated');
+    });
+    html += '</div></div>';
+  });
+  c.innerHTML = html;
+  c.querySelectorAll('.j-accordion-header').forEach(function(h) {
+    h.addEventListener('click', function() { h.parentElement.classList.toggle('open'); });
+  });
+  c.querySelectorAll('.j-accordion-body').forEach(function(b) { bindJCardEvents(b); });
+}
+
+function renderRecommendations() {
+  var c = document.getElementById('j-recommendations');
+  var b = jarvisData.briefing && jarvisData.briefing[0];
+  var recs = (b && b.recommendations) || [];
+  if (!recs.length) { c.innerHTML = '<div class="j-section-empty">No recommendations today</div>'; return; }
+  var html = '';
+  recs.forEach(function(r, i) {
+    var txt = typeof r === 'string' ? r : (r.text || r.recommendation || JSON.stringify(r));
+    html += '<div class="j-rec-item"><span class="j-rec-num">' + String(i + 1).padStart(2, '0') + '</span>';
+    html += '<span class="j-rec-text">' + esc(txt) + '</span></div>';
+  });
+  c.innerHTML = html;
+}
+
+function renderDayNav() {
+  var c = document.getElementById('j-day-nav');
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  var html = '';
+  for (var i = 6; i >= 0; i--) {
+    var d = new Date(today); d.setDate(d.getDate() - i);
+    var isActive = jDateStr(d) === jDateStr(jarvisSelectedDate);
+    var dots = isActive ? 3 : (i === 0 ? 2 : 1);
+    html += '<button class="j-day-pill' + (isActive ? ' active' : '') + '" data-date="' + jDateStr(d) + '">';
+    html += '<span class="j-day-name">' + dayNames[d.getDay()] + '</span>';
+    html += '<span class="j-day-num">' + d.getDate() + '</span>';
+    html += '<div class="j-day-dots">';
+    for (var dot = 0; dot < dots; dot++) html += '<span class="j-day-dot' + (isActive ? ' active' : '') + '"></span>';
+    html += '</div></button>';
+  }
+  c.innerHTML = html;
+  c.querySelectorAll('.j-day-pill').forEach(function(pill) {
+    pill.addEventListener('click', function() {
+      jarvisSelectedDate = new Date(pill.dataset.date + 'T12:00:00');
+      loadJarvisData();
+    });
+  });
+}
+
+function renderBellCount() {
+  var badge = document.getElementById('j-bell-count');
+  badge.textContent = jarvisSnoozedItems.length;
+  badge.classList.toggle('hidden', jarvisSnoozedItems.length === 0);
+}
+
+/* Card events */
+function bindJCardEvents(container) {
+  container.querySelectorAll('.j-card').forEach(function(card) {
+    card.addEventListener('click', function() { openJarvisDetail(card.dataset.id, card.dataset.type); });
+  });
+}
+
+/* Detail panel */
+function openJarvisDetail(itemId, itemType) {
+  if (!itemId) return;
+  var item = null;
+  if (itemType === 'job') {
+    item = (jarvisData.jobs || []).concat(jarvisData.stale || []).find(function(i) { return String(i.id) === String(itemId); });
+  }
+  if (!item) {
+    var pool = [].concat(jarvisData.pending || [], jarvisData.unack || [], jarvisData.snoozedToday || [],
+      jarvisData.completed || [], jarvisData.changed || [], jarvisSnoozedItems || []);
+    item = pool.find(function(i) { return String(i.id) === String(itemId); });
+  }
+  if (!item) return;
+  jarvisDetailItem = item;
+  jarvisDetailItem._jt = itemType || 'work_item';
+
+  // Header badges
+  var catEl = document.getElementById('j-detail-cat');
+  var projEl = document.getElementById('j-detail-project');
+  if (item.approval_status === 'pending') { catEl.textContent = 'APPROVAL'; catEl.className = 'j-card-category j-cat-approval'; }
+  else if (itemType === 'job') { catEl.textContent = 'JOB'; catEl.className = 'j-card-category j-cat-job'; }
+  else { catEl.textContent = item.status ? item.status.toUpperCase().replace('_',' ') : 'ITEM'; catEl.className = 'j-card-category j-cat-updated'; }
+  projEl.textContent = (item.project_icon||'') + ' ' + (item.project_name || '');
+
+  var body = document.getElementById('j-detail-body');
+  var html = '';
+
+  // Priority pills
+  html += '<div class="j-detail-priority-row">';
+  ['critical','high','medium','low'].forEach(function(p) {
+    html += '<button class="j-priority-pill' + (item.priority === p ? ' active' : '') + '" data-p="' + p + '">' + p.toUpperCase() + '</button>';
+  });
+  html += '</div>';
+
+  // Title + desc
+  html += '<div class="j-detail-title">' + esc(item.title || item.job_title || item.company_name || 'Untitled') + '</div>';
+  if (item.description) html += '<div class="j-detail-desc">' + esc(item.description) + '</div>';
+
+  // Action buttons
+  html += '<div class="j-detail-actions" id="j-detail-actions">';
+  if (item.approval_status === 'pending') {
+    html += '<button class="j-action-btn j-action-approve" id="j-btn-approve">APPROVE</button>';
+    html += '<button class="j-action-btn j-action-reject" id="j-btn-reject">REJECT</button>';
+  }
+  if (item.acknowledged === false && (item.priority === 'critical' || item.priority === 'high')) {
+    html += '<button class="j-action-btn j-action-ack" id="j-btn-ack">ACKNOWLEDGE</button>';
+  }
+  html += '</div>';
+
+  // Post-ack snooze row
+  html += '<div class="j-snooze-row" id="j-post-ack">';
+  html += '<input type="date" id="j-snooze-date" value="' + jDateStr(new Date(Date.now() + 86400000)) + '">';
+  html += '<button class="j-action-btn j-action-snooze" id="j-btn-snooze">SNOOZE</button>';
+  html += '<button class="j-action-btn j-action-close-item" id="j-btn-close-item">CLOSE</button>';
+  html += '</div>';
+
+  if (itemType !== 'job' && item.id) {
+    html += '<button class="j-detail-link" id="j-view-board">View on board &rarr;</button>';
+  }
+
+  body.innerHTML = html;
+  document.getElementById('j-detail-overlay').classList.add('active');
+  bindDetailActions(item);
+}
+
+function bindDetailActions(item) {
+  // Priority pills
+  document.querySelectorAll('.j-priority-pill').forEach(function(pill) {
+    pill.addEventListener('click', async function() {
+      try {
+        var h = await getHeaders();
+        var tbl = item._jt === 'job' ? 'job_applications' : 'work_items';
+        await fetch(SUPABASE_URL + '/rest/v1/' + tbl + '?id=eq.' + item.id, {
+          method: 'PATCH', headers: Object.assign({}, h, { 'Prefer': 'return=representation' }),
+          body: JSON.stringify({ priority: pill.dataset.p })
+        });
+        item.priority = pill.dataset.p;
+        document.querySelectorAll('.j-priority-pill').forEach(function(p) { p.classList.remove('active'); });
+        pill.classList.add('active');
+        toast('Priority updated', 'success');
+      } catch (e) { toast('Update failed', 'error'); }
+    });
+  });
+
+  // Approve
+  var ab = document.getElementById('j-btn-approve');
+  if (ab) ab.addEventListener('click', async function() {
+    try {
+      var h = await getHeaders();
+      var payload = { approval_status: 'approved', approved_by: 'Jason', approved_at: new Date().toISOString() };
+      var tbl = item._jt === 'job' ? 'job_applications' : 'work_items';
+      if (item._jt === 'job') payload.decision = 'apply';
+      await fetch(SUPABASE_URL + '/rest/v1/' + tbl + '?id=eq.' + item.id, {
+        method: 'PATCH', headers: Object.assign({}, h, { 'Prefer': 'return=representation' }),
+        body: JSON.stringify(payload)
+      });
+      toast('Approved', 'success');
+      closeJarvisDetail(); loadJarvisData(); loadAll();
+    } catch (e) { toast('Approve failed', 'error'); }
+  });
+
+  // Reject
+  var rb = document.getElementById('j-btn-reject');
+  if (rb) rb.addEventListener('click', async function() {
+    try {
+      var h = await getHeaders();
+      var payload = { approval_status: 'rejected' };
+      var tbl = item._jt === 'job' ? 'job_applications' : 'work_items';
+      if (item._jt === 'job') payload.decision = 'pass';
+      await fetch(SUPABASE_URL + '/rest/v1/' + tbl + '?id=eq.' + item.id, {
+        method: 'PATCH', headers: Object.assign({}, h, { 'Prefer': 'return=representation' }),
+        body: JSON.stringify(payload)
+      });
+      toast('Rejected', 'success');
+      closeJarvisDetail(); loadJarvisData(); loadAll();
+    } catch (e) { toast('Reject failed', 'error'); }
+  });
+
+  // Acknowledge
+  var ackb = document.getElementById('j-btn-ack');
+  if (ackb) ackb.addEventListener('click', async function() {
+    try {
+      var h = await getHeaders();
+      await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + item.id, {
+        method: 'PATCH', headers: Object.assign({}, h, { 'Prefer': 'return=representation' }),
+        body: JSON.stringify({ acknowledged: true, acknowledged_at: new Date().toISOString() })
+      });
+      toast('Acknowledged', 'success');
+      ackb.style.display = 'none';
+      document.getElementById('j-post-ack').classList.add('visible');
+    } catch (e) { toast('Acknowledge failed', 'error'); }
+  });
+
+  // Snooze
+  var sb2 = document.getElementById('j-btn-snooze');
+  if (sb2) sb2.addEventListener('click', async function() {
+    var dv = document.getElementById('j-snooze-date').value;
+    if (!dv) { toast('Pick a date', 'error'); return; }
+    try {
+      var h = await getHeaders();
+      await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + item.id, {
+        method: 'PATCH', headers: h, body: JSON.stringify({ snoozed_until: dv })
+      });
+      toast('Snoozed until ' + dv, 'success');
+      closeJarvisDetail(); loadJarvisData();
+    } catch (e) { toast('Snooze failed', 'error'); }
+  });
+
+  // Close item
+  var cb = document.getElementById('j-btn-close-item');
+  if (cb) cb.addEventListener('click', async function() {
+    try {
+      var h = await getHeaders();
+      await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + item.id, {
+        method: 'PATCH', headers: h,
+        body: JSON.stringify({ status: 'done', completed_at: new Date().toISOString() })
+      });
+      toast('Closed', 'success');
+      closeJarvisDetail(); loadJarvisData(); loadAll();
+    } catch (e) { toast('Close failed', 'error'); }
+  });
+
+  // View on board
+  var vb = document.getElementById('j-view-board');
+  if (vb) vb.addEventListener('click', function() {
+    closeJarvisDetail();
+    switchToBoard();
+    var bi = allItems.find(function(i) { return i.id === item.id; });
+    if (bi) {
+      activeTab = bi.status;
+      document.querySelectorAll('.tab-bar-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.status === activeTab);
+      });
+      renderMobileList();
+      setTimeout(function() {
+        var el = document.querySelector('.card[data-id="' + item.id + '"]');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+    }
+  });
+}
+
+function closeJarvisDetail() {
+  document.getElementById('j-detail-overlay').classList.remove('active');
+  jarvisDetailItem = null;
+}
+document.getElementById('j-detail-overlay').addEventListener('click', function(e) { if (e.target === this) closeJarvisDetail(); });
+document.getElementById('j-detail-close').addEventListener('click', closeJarvisDetail);
+
+/* Bell tray */
+document.getElementById('j-bell-btn').addEventListener('click', function() {
+  document.getElementById('j-bell-tray-overlay').classList.add('active');
+  document.getElementById('j-bell-tray').classList.add('active');
+  renderBellTray();
+});
+function closeBellTray() {
+  document.getElementById('j-bell-tray-overlay').classList.remove('active');
+  document.getElementById('j-bell-tray').classList.remove('active');
+}
+document.getElementById('j-bell-tray-close').addEventListener('click', closeBellTray);
+document.getElementById('j-bell-tray-overlay').addEventListener('click', closeBellTray);
+
+function renderBellTray() {
+  var c = document.getElementById('j-bell-tray-body');
+  if (!jarvisSnoozedItems.length) { c.innerHTML = '<div class="j-section-empty">No snoozed items</div>'; return; }
+  var html = '';
+  jarvisSnoozedItems.forEach(function(item) {
+    html += '<div class="j-bell-item" data-id="' + item.id + '">';
+    html += '<div class="j-bell-item-title">' + esc(item.title) + '</div>';
+    html += '<div class="j-bell-item-meta">';
+    html += '<span class="priority-dot priority-' + esc(item.priority || 'medium') + '"></span>';
+    if (item.project_name) html += '<span>' + esc((item.project_icon||'') + ' ' + item.project_name) + '</span>';
+    html += '<span>returns ' + esc(item.snoozed_until) + '</span></div>';
+    html += '<div class="j-bell-item-actions">';
+    html += '<button class="j-bell-action primary" data-act="back" data-id="' + item.id + '">Bring back now</button>';
+    html += '<button class="j-bell-action" data-act="resched" data-id="' + item.id + '">Reschedule</button>';
+    html += '<button class="j-bell-action danger" data-act="close" data-id="' + item.id + '">Close</button>';
+    html += '</div></div>';
+  });
+  c.innerHTML = html;
+  c.querySelectorAll('.j-bell-action').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      var act = btn.dataset.act, id = btn.dataset.id;
+      try {
+        var h = await getHeaders();
+        if (act === 'back') {
+          await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + id, {
+            method: 'PATCH', headers: h, body: JSON.stringify({ snoozed_until: null })
+          });
+          toast('Brought back', 'success');
+        } else if (act === 'resched') {
+          var nd = prompt('New date (YYYY-MM-DD):');
+          if (!nd) return;
+          await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + id, {
+            method: 'PATCH', headers: h, body: JSON.stringify({ snoozed_until: nd })
+          });
+          toast('Rescheduled to ' + nd, 'success');
+        } else if (act === 'close') {
+          await fetch(SUPABASE_URL + '/rest/v1/work_items?id=eq.' + id, {
+            method: 'PATCH', headers: h, body: JSON.stringify({ status: 'done', completed_at: new Date().toISOString() })
+          });
+          toast('Closed', 'success');
+        }
+        await loadJarvisData(); renderBellTray();
+      } catch (e) { toast('Action failed: ' + e.message, 'error'); }
+    });
+  });
+}
+
+/* Domain pills */
+document.getElementById('j-domain-pills').addEventListener('click', function(e) {
+  var pill = e.target.closest('.j-pill');
+  if (!pill) return;
+  jarvisDomainFilter = pill.dataset.domain;
+  document.querySelectorAll('.j-pill').forEach(function(p) { p.classList.remove('active'); });
+  pill.classList.add('active');
+  renderJarvisDashboard();
+});
 
 /* ================================================================
    INIT
