@@ -276,6 +276,12 @@ body {
 .type-spike { background: #d29922; }
 .type-chore { background: #545d6c; }
 .type-epic { background: #3fb950; }
+.card-ticket-code {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
 .card-swipe-hint {
   font-size: 11px; color: var(--text-dim); text-align: center;
   padding: 2px; opacity: 0; transition: opacity 0.2s;
@@ -1019,9 +1025,13 @@ function buildCardHTML(item, prevLabel, nextLabel) {
     var typeLabels = {bug:'bug',user_story:'story',requirement:'req',spike:'spike',chore:'chore',epic:'epic'};
     typeHtml = '<span class="card-type-badge type-' + item.type + '">' + (typeIcons[item.type]||'') + ' ' + (typeLabels[item.type]||item.type) + '</span>';
   }
+  var codeHtml = '';
+  if (item.ticket_code) {
+    codeHtml = '<span class="card-ticket-code">' + esc(item.ticket_code) + '</span>';
+  }
 
   html += '<div class="card-inner">';
-  html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>' + typeHtml + blockedHtml;
+  html += '<div class="card-meta">' + codeHtml + '<span class="priority-dot priority-' + esc(item.priority) + '" title="' + esc(item.priority) + '"></span>' + typeHtml + blockedHtml;
   html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span>';
   html += assigneeHtml + '</div>';
   if (labels) html += '<div class="card-labels">' + labels + '</div>';
@@ -1221,8 +1231,12 @@ function renderDesktopBoard() {
           '<div class="card-progress"><div class="card-progress-fill" style="width:' + dPct + '%"></div></div>' +
           '<span class="card-progress-text">' + item.completed_child_count + '/' + item.child_count + ' subtasks</span></div>';
       }
+      var dCodeHtml = '';
+      if (item.ticket_code) {
+        dCodeHtml = '<span class="card-ticket-code">' + esc(item.ticket_code) + '</span>';
+      }
       html += '<div class="card' + dBlockedClass + '" draggable="true" data-id="' + item.id + '">';
-      html += '<div class="card-meta"><span class="priority-dot priority-' + esc(item.priority) + '"></span>' + typeHtml + dBlockedHtml;
+      html += '<div class="card-meta">' + dCodeHtml + '<span class="priority-dot priority-' + esc(item.priority) + '"></span>' + typeHtml + dBlockedHtml;
       html += '<span class="card-project-tag">' + esc((item.project_icon||'') + ' ' + (item.project_name||'')) + '</span></div>';
       if (labels) html += '<div class="card-labels">' + labels + '</div>';
       html += dParentHtml;
