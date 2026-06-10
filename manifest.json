@@ -1,7 +1,7 @@
 {
-  "name": "SupaBrain Kanban",
-  "short_name": "Kanban",
-  "description": "Mobile-first kanban board for managing work items",
+  "name": "JARVIS",
+  "short_name": "JARVIS",
+  "description": "JARVIS ecosystem command center — briefing + kanban PWA",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait",

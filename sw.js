@@ -1,5 +1,5 @@
-// SupaBrain Kanban — Service Worker
-const CACHE_NAME = 'kanban-pwa-v2';
+// JARVIS PWA — Service Worker
+const CACHE_NAME = 'kanban-pwa-v3';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
