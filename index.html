@@ -8,9 +8,7 @@
 <meta name="theme-color" content="#0d1117">
 <meta name="mobile-web-app-capable" content="yes">
 <title>JARVIS</title>
-<link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./kanban-icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="./kanban-icon.svg">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiSkFSVklTIiwic2hvcnRfbmFtZSI6IkpBUlZJUyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwZDExMTciLCJ0aGVtZV9jb2xvciI6IiMwZDExMTciLCJzdGFydF91cmwiOiIuIn0=">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -240,7 +238,7 @@ input,select,textarea,button{font-family:inherit;font-size:16px;}
 .ag-load .l{font-size:10px;color:var(--tx-d);}
 .ag-bar{height:5px;border-radius:3px;background:var(--bg);display:flex;overflow:hidden;}
 .ag-bar span{display:block;height:100%;}
-.ab-backlog{background:#8b949e;} .ab-todo{background:#58a6ff;} .ab-in_progress{background:#8b5cf6;} .ab-review{background:#d29922;} .ab-done{background:#3fb950;}
+.ab-backlog{background:#8b949e;} .ab-todo{background:#58a6ff;} .ab-in_progress{background:#8b5cf6;} .ab-on_hold{background:#a371f7;} .ab-blocked{background:#f85149;} .ab-review{background:#d29922;} .ab-escalated{background:#f0883e;} .ab-done{background:#3fb950;}
 
 /* Toast */
 .toast{position:fixed;bottom:calc(68px + var(--safe-b));left:16px;right:16px;padding:12px 16px;border-radius:10px;font-size:14px;font-weight:500;color:#fff;z-index:2000;text-align:center;animation:slideUp .3s;box-shadow:0 4px 20px rgba(0,0,0,.4);}
@@ -360,7 +358,7 @@ input,select,textarea,button{font-family:inherit;font-size:16px;}
     <div class="modal-body">
       <div class="m-row"><label>Title</label><input id="m-name"></div>
       <div class="m-row"><label>Description</label><textarea id="m-desc"></textarea></div>
-      <div class="m-row-2"><div class="m-row"><label>Project</label><select id="m-proj"></select></div><div class="m-row"><label>Status</label><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="review">Review</option><option value="done">Done</option></select></div></div>
+      <div class="m-row-2"><div class="m-row"><label>Project</label><select id="m-proj"></select></div><div class="m-row"><label>Status</label><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div>
       <div class="m-row-2"><div class="m-row"><label>Priority</label><select id="m-pri"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div><div class="m-row"><label>Due</label><input type="date" id="m-due"></div></div>
       <div class="m-row"><label>Labels</label><div class="m-labels" id="m-labels"></div></div>
       <div class="comments-s" id="cmt-s" style="display:none"><h3>Comments</h3><div id="cmt-list"></div><div class="comment-row"><input id="cmt-in" placeholder="Add comment..."><button class="btn btn-p" id="btn-cmt" style="padding:8px 12px">&#10148;</button></div></div>
@@ -375,9 +373,9 @@ var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI
 var sb=window.supabase.createClient(SB_URL,SB_KEY);
 var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28',gambling:'#f85149'};
 var DL=['products','business','career','property','operations','family','hobbies','club','gambling'];
-var STATUSES=['backlog','todo','in_progress','review','done'];
-var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',review:'#d29922',done:'#3fb950'};
-var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',review:'Review',done:'Done'};
+var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
+var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950'};
+var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done'};
 
 var items=[],projects=[],labels=[],agents=[],agentsById={},projDom={};
 var briefing=null,jobLeads=[],attItems=[];
@@ -429,12 +427,12 @@ async function loadAll(){
     projDom={}; projects.forEach(function(p){projDom[p.id]=p.domain||null;});
     var bd=bR.ok?await bR.json():[]; briefing=bd[0]||null;
     jobLeads=jR.ok?await jR.json():[];
-    attItems=items.filter(function(it){return it.acknowledged===false&&['todo','in_progress','review'].indexOf(it.status)!==-1&&['critical','high'].indexOf(it.priority)!==-1;}).sort(function(a,b){var o={critical:0,high:1};return(o[a.priority]||2)-(o[b.priority]||2);}).slice(0,10);
+    attItems=items.filter(function(it){return it.acknowledged===false&&['todo','in_progress','blocked','review','escalated'].indexOf(it.status)!==-1&&['critical','high'].indexOf(it.priority)!==-1;}).sort(function(a,b){var o={critical:0,high:1};return(o[a.priority]||2)-(o[b.priority]||2);}).slice(0,10);
     renderJarvis();renderBoard();
   }catch(e){console.error(e);toast('Load error: '+e.message,'error');}
 }
 
-/* === JARVIS TAB === */
+/* ═══ JARVIS TAB ═══ */
 function renderJarvis(){
   var now=new Date(),days=['SUN','MON','TUE','WED','THU','FRI','SAT'],months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date').textContent=days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
@@ -446,7 +444,7 @@ function renderJarvis(){
 
   var cal=document.getElementById('j-cal'),dow=now.getDay(),mon=new Date(now);mon.setDate(now.getDate()-(dow===0?6:dow-1));
   cal.innerHTML='';
-  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'">'+'<span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
+  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'"><span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
 
   var pc={};items.forEach(function(it){pc[it.project_id]=(pc[it.project_id]||0)+1;});
   var sp=projects.slice().sort(function(a,b){return(pc[b.id]||0)-(pc[a.id]||0);}).slice(0,6);
@@ -466,7 +464,7 @@ function renderJStats(){
   var total=scope.length,d24=0,c24=0,flagged=0,now=Date.now(),h24=864e5;
   scope.forEach(function(it){if(it.status==='done'&&it.completed_at&&(now-new Date(it.completed_at).getTime())<h24)d24++;if(it.updated_at&&(now-new Date(it.updated_at).getTime())<h24)c24++;});
   if(briefing&&briefing.flags)flagged=briefing.flags.length;
-  document.getElementById('j-stats').innerHTML=donut(d24,total||1,'var(--green)','Done')+donut(c24,total||1,'var(--blue)','Changed')+donut(0,10,'var(--purple)','Decided')+donut(flagged,10,'var(--red)','Flagged');
+  document.getElementById('j-stats').innerHTML=donut(d24,total||1,'var(--green)','Done')+donut(c24,total||1,'#f0883e','Changed')+donut(0,10,'#79c0ff','Decided')+donut(flagged,10,'var(--red)','Flagged');
 }
 function donut(v,mx,c,lb){var p=mx?Math.min(v/mx,1):0,r=26,ci=2*Math.PI*r,off=ci*(1-p);return'<div class="j-stat"><div class="j-donut"><svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="'+r+'"/><circle class="fl" cx="32" cy="32" r="'+r+'" stroke="'+c+'" stroke-dasharray="'+ci+'" stroke-dashoffset="'+off+'"/></svg></div><div class="j-stat-n" style="color:'+c+'">'+v+'</div><div class="j-stat-l">'+lb+'</div></div>';}
 
@@ -477,7 +475,7 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'">'+'</span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
@@ -488,7 +486,7 @@ function renderRecs(){
   document.getElementById('j-recs').innerHTML=h;
 }
 
-/* === BOARD TAB === */
+/* ═══ BOARD TAB ═══ */
 function renderBoard(){
   popProjectSelect();popAgentFilter();popLabelFilter();popDomainChips();
   document.getElementById('b-loading').style.display='none';
@@ -514,7 +512,7 @@ function popLabelFilter(){
 }
 function popDomainChips(){
   var c=document.getElementById('fd-domain');c.innerHTML='<span class="fd-chip active" data-d="all" style="background:var(--card)">All</span>';
-  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'">'+'</span>'+esc(p.domain)+'</span>';}});
+  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'"></span>'+esc(p.domain)+'</span>';}});
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
@@ -546,9 +544,9 @@ function renderBoardContent(){
 }
 function renderBoardStats(){
   var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
-  var total=scope.length,byS={backlog:0,todo:0,in_progress:0,review:0,done:0},unas=0;
+  var total=scope.length,byS={backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},unas=0;
   scope.forEach(function(it){if(byS[it.status]!==undefined)byS[it.status]++;if(!it.agent_name)unas++;});
-  var flight=byS.todo+byS.in_progress+byS.review,dp=total?Math.round(byS.done/total*100):0;
+  var flight=byS.todo+byS.in_progress+byS.review+byS.escalated,dp=total?Math.round(byS.done/total*100):0;
   document.getElementById('bs-total').textContent=total;
   document.getElementById('bs-done').innerHTML=byS.done+' <small id="bs-pct">'+dp+'%</small>';
   document.getElementById('bs-flight').textContent=flight;
@@ -561,7 +559,7 @@ function renderBoardStats(){
 function renderAgents(){
   var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
   var byA={},unas=0;
-  scope.forEach(function(it){if(!it.assigned_agent_id){unas++;return;}var g=byA[it.assigned_agent_id]||(byA[it.assigned_agent_id]={total:0,st:{backlog:0,todo:0,in_progress:0,review:0,done:0},name:it.agent_name,icon:it.agent_icon});g.total++;if(g.st[it.status]!==undefined)g.st[it.status]++;});
+  scope.forEach(function(it){if(!it.assigned_agent_id){unas++;return;}var g=byA[it.assigned_agent_id]||(byA[it.assigned_agent_id]={total:0,st:{backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},name:it.agent_name,icon:it.agent_icon});g.total++;if(g.st[it.status]!==undefined)g.st[it.status]++;});
   var ids=Object.keys(byA);ids.sort(function(a,b){return(byA[b].total-byA[b].st.done)-(byA[a].total-byA[a].st.done);});
   var h='';
   ids.forEach(function(id){
@@ -580,8 +578,8 @@ function renderCards(){
   filtered.forEach(function(it){
     var dom=iDom(it),stripe=dom?(DC[dom]||'var(--tx-d)'):'var(--tx-d)';
     var lbs='';if(it.labels&&it.labels.length)it.labels.forEach(function(lb){lbs+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done';dueH='<span style="'+(ov?'color:var(--red)':'')+'">📅 '+it.due_date+'</span>';}
-    var cmtH=it.comment_count>0?'<span>💬 '+it.comment_count+'</span>':'';
+    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">\u{1F4C5} '+it.due_date+'</span>';}
+    var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
     var agH=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta"><span class="pri-dot pri-'+esc(it.priority)+'"></span>';
     if(!singleP)h+='<span class="card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span>';
@@ -721,9 +719,6 @@ document.getElementById('modal-bg').addEventListener('click',function(e){if(e.ta
 document.getElementById('fab-new').addEventListener('click',function(){openNewModal(curCol);});
 
 checkAuth();
-
-/* Service Worker registration */
-if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(e){console.log('SW registration failed:',e);});}
 </script>
 </body>
 </html>
