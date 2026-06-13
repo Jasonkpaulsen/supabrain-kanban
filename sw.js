@@ -2,7 +2,8 @@
 // SB-184: Fixed references (was kanban-pwa.html)
 // SB-185: Safe update flow (skipWaiting only on user acceptance)
 // SB-186: Background-sync queue removed, cache purge on logout
-const CACHE_NAME = 'jarvis-pwa-v5';
+// SB-199/200: Domain-aware narrative swap in dashboards
+const CACHE_NAME = 'jarvis-pwa-v6';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
