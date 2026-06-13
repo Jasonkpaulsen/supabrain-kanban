@@ -1,0 +1,16 @@
+{
+  "name": "Article Studio — LinkedIn Content Engine",
+  "short_name": "Article Studio",
+  "description": "Review, give editorial feedback, approve, schedule, and manage LinkedIn articles and header images.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0e0e",
+  "theme_color": "#0e0e0e",
+  "categories": ["productivity", "business"],
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
