@@ -236,7 +236,8 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 /* Agent panel */
 .agent-panel{max-height:0;overflow:hidden;transition:max-height .25s ease;background:var(--sf);}
 .agent-panel.open{max-height:80vh;border-bottom:1px solid var(--div);}
-.agent-scroll-wrap{overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:10px 16px;}
+.agent-panel.scrollable{overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.agent-scroll-wrap{padding:10px 16px;}
 .agent-grid{display:flex;flex-direction:column;gap:8px;}
 .ag-card{background:var(--card);border:1px solid var(--card-b);border-radius:8px;padding:10px 12px;}
 .ag-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -268,10 +269,10 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <body>
 
 <!-- Offline staleness banner (SB-186) -->
-<div id="offline-banner">&#9888; OFFLINE &#8212; Viewing cached data as of <span id="offline-ts">&#8212;</span></div>
+<div id="offline-banner">&#9888; OFFLINE — Viewing cached data as of <span id="offline-ts">—</span></div>
 
 <!-- SW update toast (SB-185) -->
-<div id="sw-update-toast">Update available &#8212; tap to refresh</div>
+<div id="sw-update-toast">Update available — tap to refresh</div>
 
 <!-- Login -->
 <div id="login-overlay">
@@ -455,7 +456,7 @@ async function loadAll(){
   }catch(e){console.error(e);toast('Load error: '+e.message,'error');}
 }
 
-/* &#9552;&#9552;&#9552; JARVIS TAB &#9552;&#9552;&#9552; */
+/* ═══ JARVIS TAB ═══ */
 function renderJarvis(){
   var now=new Date(),days=['SUN','MON','TUE','WED','THU','FRI','SAT'],months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date').textContent=days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
@@ -467,7 +468,7 @@ function renderJarvis(){
 
   var cal=document.getElementById('j-cal'),dow=now.getDay(),mon=new Date(now);mon.setDate(now.getDate()-(dow===0?6:dow-1));
   cal.innerHTML='';
-  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'"><span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
+  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'">'+'<span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
 
   var pc={};items.forEach(function(it){pc[it.project_id]=(pc[it.project_id]||0)+1;});
   var sp=projects.slice().sort(function(a,b){return(pc[b.id]||0)-(pc[a.id]||0);}).slice(0,6);
@@ -498,7 +499,7 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'">'+'</span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
@@ -509,7 +510,7 @@ function renderRecs(){
   document.getElementById('j-recs').innerHTML=h;
 }
 
-/* &#9552;&#9552;&#9552; BOARD TAB &#9552;&#9552;&#9552; */
+/* ═══ BOARD TAB ═══ */
 function renderBoard(){
   popProjectSelect();popAgentFilter();popLabelFilter();popDomainChips();
   document.getElementById('b-loading').style.display='none';
@@ -535,7 +536,7 @@ function popLabelFilter(){
 }
 function popDomainChips(){
   var c=document.getElementById('fd-domain');c.innerHTML='<span class="fd-chip active" data-d="all" style="background:var(--card)">All</span>';
-  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'"></span>'+esc(p.domain)+'</span>';}});
+  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'">'+'</span>'+esc(p.domain)+'</span>';}});
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
@@ -599,12 +600,13 @@ function renderAgents(){
   fixAgentScroll();
 }
 function fixAgentScroll(){
-  var wrap=document.getElementById('agent-scroll-wrap');
-  if(!wrap)return;
   var panel=document.getElementById('agent-panel');
-  if(!panel.classList.contains('open')){wrap.style.maxHeight='0';return;}
-  var avail=window.innerHeight*0.65;
-  wrap.style.maxHeight=Math.max(avail,200)+'px';
+  if(!panel)return;
+  if(panel.classList.contains('open')){
+    panel.classList.add('scrollable');
+  }else{
+    panel.classList.remove('scrollable');
+  }
 }
 async function tglAgentAuto(btn){
   if(offlineGuard())return;
@@ -678,10 +680,15 @@ document.getElementById('stats-toggle').addEventListener('click',function(){
 
 /* Agent panel toggle */
 document.getElementById('btn-agents').addEventListener('click',function(){
-  var p=document.getElementById('agent-panel');var isOpen=p.classList.toggle('open');
-  document.getElementById('btn-agents').classList.toggle('active',isOpen);
-  if(isOpen){p.addEventListener('transitionend',function h(){fixAgentScroll();p.removeEventListener('transitionend',h);});}
-  else{var w=document.getElementById('agent-scroll-wrap');if(w)w.style.maxHeight='0';}
+  var p=document.getElementById('agent-panel');
+  if(p.classList.contains('open')){
+    p.classList.remove('scrollable');
+    p.classList.remove('open');
+  }else{
+    p.classList.add('open');
+    p.addEventListener('transitionend',function h(){p.classList.add('scrollable');p.removeEventListener('transitionend',h);});
+  }
+  document.getElementById('btn-agents').classList.toggle('active',p.classList.contains('open'));
 });
 
 /* Filter drawer */
@@ -813,7 +820,7 @@ document.getElementById('fab-new').addEventListener('click',function(){openNewMo
 var lastOnlineTimestamp = new Date().toISOString();
 function offlineGuard() {
   if (!navigator.onLine) {
-    toast('You are offline &#8212; changes cannot be saved', 'error');
+    toast('You are offline — changes cannot be saved', 'error');
     return true; // blocked
   }
   return false; // allow
@@ -883,7 +890,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// User taps the update toast &#8594; tell the waiting SW to activate
+// User taps the update toast → tell the waiting SW to activate
 document.getElementById('sw-update-toast').addEventListener('click', function() {
   if (swUpdateWaiting) {
     swUpdateWaiting.postMessage({ type: 'SKIP_WAITING' });
