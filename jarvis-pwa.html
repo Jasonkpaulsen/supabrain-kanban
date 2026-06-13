@@ -403,8 +403,9 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 var SB_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
 var sb=window.supabase.createClient(SB_URL,SB_KEY);
-var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28',gambling:'#f85149'};
-var DL=['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28',gambling:'#f85149','prediction-markets':'#f85149'};
+var DL_FALLBACK=['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DL=DL_FALLBACK; // overridden dynamically from briefing data
 var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
 var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950'};
 var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done'};
@@ -471,6 +472,12 @@ function renderJarvis(){
   var now=new Date(),days=['SUN','MON','TUE','WED','THU','FRI','SAT'],months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date').textContent=days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
 
+  // Domain chips — dynamic from briefing data (SB-200)
+  if(briefing && briefing.domain_summaries){
+    DL = Object.keys(briefing.domain_summaries).sort();
+  } else {
+    DL = DL_FALLBACK;
+  }
   var cb=document.getElementById('j-chips');
   cb.innerHTML='<span class="j-chip active" data-d="all">All</span>';
   DL.forEach(function(d){cb.innerHTML+='<span class="j-chip" data-d="'+d+'">'+d+'</span>';});
@@ -491,7 +498,16 @@ function renderJarvis(){
 }
 
 function getJDom(){var c=document.querySelector('#j-chips .j-chip.active');return c?c.dataset.d:'all';}
-function renderJFiltered(){renderJStats();renderAtt();}
+function renderJFiltered(){
+  // Swap narrative based on selected domain (SB-200)
+  var dom=getJDom();
+  if(dom!=='all' && briefing && briefing.domain_summaries && briefing.domain_summaries[dom]){
+    document.getElementById('j-narr').textContent=briefing.domain_summaries[dom];
+  } else if(briefing && briefing.narrative_summary){
+    document.getElementById('j-narr').textContent=briefing.narrative_summary;
+  }
+  renderJStats();renderAtt();
+}
 
 function renderJStats(){
   var ad=getJDom(),scope=items.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;});
