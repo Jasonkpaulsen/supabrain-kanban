@@ -233,10 +233,16 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .comment-row{display:flex;gap:6px;margin-top:8px;}
 .comment-row input{flex:1;padding:10px;background:var(--bg);border:1px solid var(--card-b);border-radius:8px;color:var(--tx);font-size:14px;outline:none;}
 
-/* Agent panel */
-.agent-panel{display:none;background:var(--sf);border-bottom:1px solid var(--div);}
-.agent-panel.open{display:block;}
-.agent-scroll-wrap{padding:10px 16px;}
+/* Agent panel — full-screen bottom sheet */
+.agent-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);z-index:500;}
+.agent-overlay.open{display:block;}
+.agent-panel{position:fixed;left:0;right:0;bottom:0;top:48px;background:var(--sf);z-index:501;overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .25s ease;border-radius:16px 16px 0 0;}
+.agent-overlay.open .agent-panel{transform:translateY(0);}
+.agent-panel-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--div);position:sticky;top:0;background:var(--sf);z-index:1;border-radius:16px 16px 0 0;}
+.agent-panel-head h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--tx-m);}
+.agent-close{background:none;border:none;color:var(--tx-m);font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;}
+.agent-close:hover{background:var(--card);}
+.agent-scroll-wrap{padding:10px 16px;padding-bottom:calc(24px + var(--safe-b));}
 .agent-grid{display:flex;flex-direction:column;gap:8px;}
 .ag-card{background:var(--card);border:1px solid var(--card-b);border-radius:8px;padding:10px 12px;}
 .ag-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -332,9 +338,6 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
         </div>
         <div class="b-progress"><div class="b-progress-bar"><span class="seg-d" id="seg-d" style="width:0"></span><span class="seg-r" id="seg-r" style="width:0"></span><span class="seg-p" id="seg-p" style="width:0"></span></div></div>
       </div>
-      <div class="agent-panel" id="agent-panel">
-        <div class="agent-scroll-wrap" id="agent-scroll-wrap"><div class="agent-grid" id="agent-grid"></div></div>
-      </div>
       <div class="col-tabs" id="col-tabs"></div>
       <div id="b-loading" class="loading-msg">Loading...</div>
       <div class="cards-area" id="cards-area" style="display:none"></div>
@@ -385,6 +388,14 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
       <div class="comments-s" id="cmt-s" style="display:none"><h3>Comments</h3><div id="cmt-list"></div><div class="comment-row"><input id="cmt-in" placeholder="Add comment..."><button class="btn btn-p" id="btn-cmt" style="padding:8px 12px">&#10148;</button></div></div>
       <div class="m-actions"><button class="btn btn-del" id="btn-del" style="display:none">Delete</button><button class="btn" id="btn-cancel">Cancel</button><button class="btn btn-p" id="btn-save">Save</button></div>
     </div>
+  </div>
+</div>
+
+<!-- Agent bottom sheet (fixed overlay — outside .panels scroll context, SB-194) -->
+<div class="agent-overlay" id="agent-overlay">
+  <div class="agent-panel" id="agent-panel">
+    <div class="agent-panel-head"><h3>&#9889; Agents</h3><button class="agent-close" id="agent-close">&times;</button></div>
+    <div class="agent-scroll-wrap" id="agent-scroll-wrap"><div class="agent-grid" id="agent-grid"></div></div>
   </div>
 </div>
 
@@ -467,7 +478,7 @@ function renderJarvis(){
 
   var cal=document.getElementById('j-cal'),dow=now.getDay(),mon=new Date(now);mon.setDate(now.getDate()-(dow===0?6:dow-1));
   cal.innerHTML='';
-  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'\><span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
+  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'"><span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
 
   var pc={};items.forEach(function(it){pc[it.project_id]=(pc[it.project_id]||0)+1;});
   var sp=projects.slice().sort(function(a,b){return(pc[b.id]||0)-(pc[a.id]||0);}).slice(0,6);
@@ -498,7 +509,7 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'\></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
@@ -535,7 +546,7 @@ function popLabelFilter(){
 }
 function popDomainChips(){
   var c=document.getElementById('fd-domain');c.innerHTML='<span class="fd-chip active" data-d="all" style="background:var(--card)">All</span>';
-  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'\></span>'+esc(p.domain)+'</span>';}});
+  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'"></span>'+esc(p.domain)+'</span>';}});
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
@@ -669,12 +680,15 @@ document.getElementById('stats-toggle').addEventListener('click',function(){
   document.getElementById('stats-arrow').innerHTML=open?'&#9650;':'&#9660;';
 });
 
-/* Agent panel toggle */
+/* Agent panel toggle — bottom sheet overlay (SB-194) */
+function closeAgentPanel(){document.getElementById('agent-overlay').classList.remove('open');document.getElementById('btn-agents').classList.remove('active');}
 document.getElementById('btn-agents').addEventListener('click',function(){
-  var p=document.getElementById('agent-panel');
-  p.classList.toggle('open');
-  document.getElementById('btn-agents').classList.toggle('active',p.classList.contains('open'));
+  var o=document.getElementById('agent-overlay');
+  o.classList.toggle('open');
+  document.getElementById('btn-agents').classList.toggle('active',o.classList.contains('open'));
 });
+document.getElementById('agent-close').addEventListener('click',closeAgentPanel);
+document.getElementById('agent-overlay').addEventListener('click',function(e){if(e.target===this)closeAgentPanel();});
 
 /* Filter drawer */
 document.getElementById('btn-filter').addEventListener('click',function(){document.getElementById('filt-overlay').classList.add('open');document.getElementById('filt-drawer').classList.add('open');});
