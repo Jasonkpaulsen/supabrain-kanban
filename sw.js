@@ -1,45 +1,49 @@
 // JARVIS PWA — Service Worker
-const CACHE_NAME = 'kanban-pwa-v3';
+// SB-184: Fixed references (was kanban-pwa.html)
+// SB-185: Safe update flow (skipWaiting only on user acceptance)
+// SB-186: Background-sync queue removed, cache purge on logout
+const CACHE_NAME = 'jarvis-pwa-v3';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
 const APP_SHELL = [
-  './index.html',
+  './jarvis-pwa.html',
   './manifest.json',
   './kanban-icon.svg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
 ];
 
 // ------------------------------------------------------------------
-// Install — cache the app shell
+// Install — cache the app shell, but do NOT auto-skipWaiting
+// The client will send SKIP_WAITING when the user accepts the update
 // ------------------------------------------------------------------
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   );
-  self.skipWaiting();
+  // Do NOT call self.skipWaiting() here — wait for user acceptance
 });
 
 // ------------------------------------------------------------------
-// Activate — clean old caches
+// Activate — clean old caches, then claim clients
 // ------------------------------------------------------------------
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 // ------------------------------------------------------------------
-// Fetch — network-first for API & HTML, cache-first for assets
+// Fetch — network-first for API, cache-first for shell
 // ------------------------------------------------------------------
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
   // Supabase API calls — network first, fall back to cache
   if (url.hostname === SUPABASE_HOST) {
+    // Only cache GET requests (reads)
     if (e.request.method === 'GET') {
       e.respondWith(
         fetch(e.request)
@@ -51,6 +55,7 @@ self.addEventListener('fetch', (e) => {
           .catch(() => caches.match(e.request))
       );
     }
+    // Non-GET API calls: just fetch, don't cache
     return;
   }
 
@@ -84,77 +89,27 @@ self.addEventListener('fetch', (e) => {
 });
 
 // ------------------------------------------------------------------
-// Background Sync — replay queued mutations when back online
-// ------------------------------------------------------------------
-self.addEventListener('sync', (e) => {
-  if (e.tag === 'sync-mutations') {
-    e.waitUntil(replayQueue());
-  }
-});
-
-async function replayQueue() {
-  const db = await openSyncDB();
-  const tx = db.transaction('mutations', 'readonly');
-  const store = tx.objectStore('mutations');
-  const all = await idbGetAll(store);
-
-  for (const entry of all) {
-    try {
-      const res = await fetch(entry.url, {
-        method: entry.method,
-        headers: entry.headers,
-        body: entry.body
-      });
-      if (res.ok) {
-        const delTx = db.transaction('mutations', 'readwrite');
-        delTx.objectStore('mutations').delete(entry.id);
-        await idbComplete(delTx);
-      }
-    } catch (_) {
-      break;
-    }
-  }
-}
-
-// Simple IndexedDB helpers
-function openSyncDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('kanban-sync', 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('mutations')) {
-        db.createObjectStore('mutations', { keyPath: 'id', autoIncrement: true });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function idbGetAll(store) {
-  return new Promise((resolve, reject) => {
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function idbComplete(tx) {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-// ------------------------------------------------------------------
-// Message handler — receive queued mutations from the client
+// Message handler — SKIP_WAITING + PURGE_CACHE
+// No background-sync queue — removed per SB-186 (governance guardrail)
 // ------------------------------------------------------------------
 self.addEventListener('message', (e) => {
-  if (e.data && e.data.type === 'QUEUE_MUTATION') {
-    openSyncDB().then((db) => {
-      const tx = db.transaction('mutations', 'readwrite');
-      tx.objectStore('mutations').add(e.data.payload);
-      return idbComplete(tx);
+  // User accepted the update toast — activate the new SW now
+  if (e.data && e.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+
+  // Logout — purge all cached API responses to prevent stale auth data
+  if (e.data && e.data.type === 'PURGE_CACHE') {
+    caches.open(CACHE_NAME).then((cache) => {
+      cache.keys().then((requests) => {
+        requests.forEach((req) => {
+          const url = new URL(req.url);
+          // Delete cached Supabase API responses (authenticated data)
+          if (url.hostname === SUPABASE_HOST) {
+            cache.delete(req);
+          }
+        });
+      });
     });
   }
 });
