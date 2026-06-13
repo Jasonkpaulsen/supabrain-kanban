@@ -401,8 +401,9 @@ var SUPABASE_URL = 'https://hzqqvbvhnzmgqivfigej.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', gambling:'#f85149' };
-var DOMAIN_LIST = ['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', gambling:'#f85149', 'prediction-markets':'#f85149' };
+var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DOMAIN_LIST = DOMAIN_LIST_FALLBACK; // overridden dynamically from briefing data
 var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
 
 var allItems=[], allProjects=[], allLabels=[], allAgents=[], agentsById={}, projectDomain={};
@@ -496,7 +497,12 @@ function renderJarvisTab(){
   var months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date-display').textContent = days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
 
-  // Domain chips
+  // Domain chips — dynamic from briefing data (SB-199)
+  if(briefingData && briefingData.domain_summaries){
+    DOMAIN_LIST = Object.keys(briefingData.domain_summaries).sort();
+  } else {
+    DOMAIN_LIST = DOMAIN_LIST_FALLBACK;
+  }
   var domBar=document.getElementById('j-domain-bar');
   domBar.innerHTML='<span class="j-chip active" data-jdomain="all">All</span>';
   DOMAIN_LIST.forEach(function(d){
@@ -557,6 +563,13 @@ function renderJarvisTab(){
 function getActiveDomain(){ var c=document.querySelector('#j-domain-bar .j-chip.active'); return c?c.dataset.jdomain:'all'; }
 
 function renderJarvisFiltered(){
+  // Swap narrative based on selected domain (SB-199)
+  var dom=getActiveDomain();
+  if(dom!=='all' && briefingData && briefingData.domain_summaries && briefingData.domain_summaries[dom]){
+    document.getElementById('j-narrative').textContent=briefingData.domain_summaries[dom];
+  } else if(briefingData && briefingData.narrative_summary){
+    document.getElementById('j-narrative').textContent=briefingData.narrative_summary;
+  }
   renderJarvisStats();
   renderAttentionItems();
 }
@@ -614,7 +627,7 @@ function renderAttentionItems(){
   filtered.forEach(function(it){
     html+='<div class="j-att-card"><div class="j-att-meta">';
     html+='<span class="j-att-code">'+esc(it.ticket_code||'')+'</span>';
-    html+='<span class="j-att-dot" style="background:'+(it.priority==='critical'?'var(--accent-red)':'var(--accent-orange)')+'"</span>';
+    html+='<span class="j-att-dot" style="background:'+(it.priority==='critical'?'var(--accent-red)':'var(--accent-orange)')+'"></span>';
     html+='<span class="j-att-badge unack">Unack</span>';
     html+='<span class="j-att-project">'+esc((it.project_icon||'')+' '+( it.project_name||''))+'</span>';
     html+='</div>';
@@ -701,7 +714,8 @@ function renderBoardStats(scope){
   document.getElementById('seg-done').style.width=w(byStatus.done)+'%';
   document.getElementById('seg-review').style.width=w(byStatus.review)+'%';
   document.getElementById('seg-prog').style.width=w(byStatus.in_progress)+'%';
-  var dh=''; DOMAIN_LIST.forEach(function(d){ var ct=byDomain[d]||0; if(ct>0||currentProject==='all') dh+='<div class="domain-row"><span class="dot" style="background:'+DOMAIN_COLORS[d]+'"></span><span class="nm">'+esc(d)+'</span><span class="ct">'+ct+'</span></div>'; });
+  var dh=''; var allDoms=Object.keys(byDomain).sort(); if(!allDoms.length) allDoms=DOMAIN_LIST;
+  allDoms.forEach(function(d){ var ct=byDomain[d]||0; if(ct>0||currentProject==='all') dh+='<div class="domain-row"><span class="dot" style="background:'+(DOMAIN_COLORS[d]||'#8b949e')+'"></span><span class="nm">'+esc(d)+'</span><span class="ct">'+ct+'</span></div>'; });
   document.getElementById('domain-rows').innerHTML=dh||'<div style="font-size:12px;color:var(--text-dim)">No items</div>';
 }
 function renderUtilization(scope){
