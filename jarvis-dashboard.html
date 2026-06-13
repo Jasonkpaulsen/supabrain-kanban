@@ -161,7 +161,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .util-head h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
 .util-summary { font-size: 12px; color: var(--text-dim); display: flex; gap: 18px; flex-wrap: wrap; }
 .util-summary b { color: var(--text); font-weight: 700; }
-.util-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; max-height: calc(60vh - 60px); overflow-y: auto; }
+.util-scroll-wrap { overflow-y: scroll; -webkit-overflow-scrolling: touch; }
+.util-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
 .agent-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 13px 14px; }
 .agent-card.unassigned-card { border-style: dashed; }
 .ac-top { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
@@ -349,7 +350,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     </div>
     <div class="util-panel open" id="util-panel">
       <div class="util-head"><h3>&#9889; Claude Agent Utilization</h3><div class="util-summary" id="util-summary"></div><a href="https://claude.ai/settings/usage" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px;color:var(--accent-blue);text-decoration:none">claude.ai usage &#8599;</a></div>
-      <div class="util-grid" id="util-grid"></div>
+      <div class="util-scroll-wrap" id="util-scroll-wrap"><div class="util-grid" id="util-grid"></div></div>
     </div>
     <div class="filter-bar">
       <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span></div>
@@ -512,7 +513,7 @@ function renderJarvisTab(){
   for(var i=0;i<7;i++){
     var d=new Date(monday); d.setDate(monday.getDate()+i);
     var isToday=d.toDateString()===now.toDateString();
-    cal.innerHTML+='<div class="j-cal-day'+(isToday?' today':'')+'">'+'<span class="day-label">'+days[d.getDay()]+'</span>'+'<span class="day-num">'+d.getDate()+'</span>'+'<span class="day-dots"></span></div>';
+    cal.innerHTML+='<div class="j-cal-day'+(isToday?' today':'')+'"><span class="day-label">'+days[d.getDay()]+'</span><span class="day-num">'+d.getDate()+'</span><span class="day-dots"></span></div>';
   }
 
   // Project badges (top 8 by item count)
@@ -613,7 +614,7 @@ function renderAttentionItems(){
   filtered.forEach(function(it){
     html+='<div class="j-att-card"><div class="j-att-meta">';
     html+='<span class="j-att-code">'+esc(it.ticket_code||'')+'</span>';
-    html+='<span class="j-att-dot" style="background:'+(it.priority==='critical'?'var(--accent-red)':'var(--accent-orange)')+'">'+'</span>';
+    html+='<span class="j-att-dot" style="background:'+(it.priority==='critical'?'var(--accent-red)':'var(--accent-orange)')+'"</span>';
     html+='<span class="j-att-badge unack">Unack</span>';
     html+='<span class="j-att-project">'+esc((it.project_icon||'')+' '+( it.project_name||''))+'</span>';
     html+='</div>';
@@ -725,6 +726,19 @@ function renderUtilization(scope){
   if(unassigned>0) html+='<div class="agent-card unassigned-card"><div class="ac-top"><div class="ac-av">∅</div><div class="ac-id"><div class="ac-name">Unassigned</div><div class="ac-role">No agent owner</div></div><span class="ac-status idle">gap</span></div><div class="ac-load"><span class="n">'+unassigned+'</span><span class="lbl">tickets need an owner</span></div></div>';
   grid.innerHTML=html;
   grid.querySelectorAll('.auto-tgl').forEach(function(btn){ btn.addEventListener('click', function(e){ e.stopPropagation(); toggleAgentAutomation(btn); }); });
+  fixUtilScroll();
+}
+function fixUtilScroll(){
+  var wrap=document.getElementById('util-scroll-wrap');
+  if(!wrap)return;
+  var panel=document.getElementById('util-panel');
+  if(!panel.classList.contains('open')){wrap.style.maxHeight='0';return;}
+  var head=panel.querySelector('.util-head');
+  var headH=head?head.offsetHeight:0;
+  var padTop=16,padBot=20;
+  var avail=Math.min(window.innerHeight*0.7, parseFloat(getComputedStyle(panel).maxHeight)||window.innerHeight*0.8);
+  var scrollH=avail-headH-padTop-padBot-14;
+  wrap.style.maxHeight=Math.max(scrollH,200)+'px';
 }
 async function toggleAgentAutomation(btn){
   if(navigator.onLine===false){ toast('Offline — automation locked','error'); return; }
@@ -760,7 +774,7 @@ function renderBoard(){
     items.forEach(function(item){
       var dom=itemDomain(item), stripe=dom?(DOMAIN_COLORS[dom]||'var(--text-dim)'):'var(--text-dim)';
       var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-      var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">'+'📅 '+item.due_date+'</span>';}
+      var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
       var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
       var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
       var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
@@ -904,7 +918,7 @@ document.getElementById('domain-chips').addEventListener('click',function(e){var
 document.getElementById('filter-clear').addEventListener('click',function(){statusFilter='all';domainFilter='all';agentFilter='all';priorityFilter='all';labelFilter='all';flagFilter='all';searchQuery='';document.getElementById('agent-filter').value='all';document.getElementById('priority-filter').value='all';document.getElementById('label-filter').value='all';document.getElementById('flag-filter').value='all';document.getElementById('search-input').value='';document.querySelectorAll('#status-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.status==='all');});document.querySelectorAll('#domain-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.domain==='all');});renderBoard();});
 document.getElementById('btn-new').addEventListener('click',function(){openNewModal('backlog');});
 document.getElementById('btn-refresh').addEventListener('click',loadAll);
-document.getElementById('btn-util').addEventListener('click',function(){var open=document.getElementById('util-panel').classList.toggle('open');this.classList.toggle('active',open);});
+document.getElementById('btn-util').addEventListener('click',function(){var panel=document.getElementById('util-panel');var open=panel.classList.toggle('open');this.classList.toggle('active',open);if(open){panel.addEventListener('transitionend',function h(){fixUtilScroll();panel.removeEventListener('transitionend',h);});}else{var w=document.getElementById('util-scroll-wrap');if(w)w.style.maxHeight='0';}});
 
 /* ── URL hash routing ── */
 function routeFromHash(){
