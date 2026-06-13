@@ -236,7 +236,8 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 /* Agent panel */
 .agent-panel{max-height:0;overflow:hidden;transition:max-height .25s ease;background:var(--sf);}
 .agent-panel.open{max-height:80vh;border-bottom:1px solid var(--div);}
-.agent-grid{padding:10px 16px;display:flex;flex-direction:column;gap:8px;max-height:calc(60vh - 20px);overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.agent-scroll-wrap{overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:10px 16px;}
+.agent-grid{display:flex;flex-direction:column;gap:8px;}
 .ag-card{background:var(--card);border:1px solid var(--card-b);border-radius:8px;padding:10px 12px;}
 .ag-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .ag-av{width:28px;height:28px;border-radius:50%;background:var(--bg);border:1px solid var(--card-b);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
@@ -267,10 +268,10 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <body>
 
 <!-- Offline staleness banner (SB-186) -->
-<div id="offline-banner">&#9888; OFFLINE — Viewing cached data as of <span id="offline-ts">—</span></div>
+<div id="offline-banner">&#9888; OFFLINE &#8212; Viewing cached data as of <span id="offline-ts">&#8212;</span></div>
 
 <!-- SW update toast (SB-185) -->
-<div id="sw-update-toast">Update available — tap to refresh</div>
+<div id="sw-update-toast">Update available &#8212; tap to refresh</div>
 
 <!-- Login -->
 <div id="login-overlay">
@@ -332,7 +333,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
         <div class="b-progress"><div class="b-progress-bar"><span class="seg-d" id="seg-d" style="width:0"></span><span class="seg-r" id="seg-r" style="width:0"></span><span class="seg-p" id="seg-p" style="width:0"></span></div></div>
       </div>
       <div class="agent-panel" id="agent-panel">
-        <div class="agent-grid" id="agent-grid"></div>
+        <div class="agent-scroll-wrap" id="agent-scroll-wrap"><div class="agent-grid" id="agent-grid"></div></div>
       </div>
       <div class="col-tabs" id="col-tabs"></div>
       <div id="b-loading" class="loading-msg">Loading...</div>
@@ -454,7 +455,7 @@ async function loadAll(){
   }catch(e){console.error(e);toast('Load error: '+e.message,'error');}
 }
 
-/* ═══ JARVIS TAB ═══ */
+/* &#9552;&#9552;&#9552; JARVIS TAB &#9552;&#9552;&#9552; */
 function renderJarvis(){
   var now=new Date(),days=['SUN','MON','TUE','WED','THU','FRI','SAT'],months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date').textContent=days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
@@ -497,7 +498,7 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"</span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
@@ -508,7 +509,7 @@ function renderRecs(){
   document.getElementById('j-recs').innerHTML=h;
 }
 
-/* ═══ BOARD TAB ═══ */
+/* &#9552;&#9552;&#9552; BOARD TAB &#9552;&#9552;&#9552; */
 function renderBoard(){
   popProjectSelect();popAgentFilter();popLabelFilter();popDomainChips();
   document.getElementById('b-loading').style.display='none';
@@ -595,6 +596,15 @@ function renderAgents(){
   var ag=document.getElementById('agent-grid');
   ag.innerHTML=h||'<div style="color:var(--tx-d);font-size:12px;padding:8px 0">No agents in view.</div>';
   ag.querySelectorAll('.auto-tgl').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();tglAgentAuto(btn);});});
+  fixAgentScroll();
+}
+function fixAgentScroll(){
+  var wrap=document.getElementById('agent-scroll-wrap');
+  if(!wrap)return;
+  var panel=document.getElementById('agent-panel');
+  if(!panel.classList.contains('open')){wrap.style.maxHeight='0';return;}
+  var avail=window.innerHeight*0.65;
+  wrap.style.maxHeight=Math.max(avail,200)+'px';
 }
 async function tglAgentAuto(btn){
   if(offlineGuard())return;
@@ -620,8 +630,8 @@ function renderCards(){
   filtered.forEach(function(it){
     var dom=iDom(it),stripe=dom?(DC[dom]||'var(--tx-d)'):'var(--tx-d)';
     var lbs='';if(it.labels&&it.labels.length)it.labels.forEach(function(lb){lbs+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">📅 '+it.due_date+'</span>';}
-    var cmtH=it.comment_count>0?'<span>💬 '+it.comment_count+'</span>':'';
+    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">\u{1F4C5} '+it.due_date+'</span>';}
+    var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
     var agH=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta"><span class="pri-dot pri-'+esc(it.priority)+'"></span>';
     if(!singleP)h+='<span class="card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span>';
@@ -668,8 +678,10 @@ document.getElementById('stats-toggle').addEventListener('click',function(){
 
 /* Agent panel toggle */
 document.getElementById('btn-agents').addEventListener('click',function(){
-  var p=document.getElementById('agent-panel');p.classList.toggle('open');
-  document.getElementById('btn-agents').classList.toggle('active',p.classList.contains('open'));
+  var p=document.getElementById('agent-panel');var isOpen=p.classList.toggle('open');
+  document.getElementById('btn-agents').classList.toggle('active',isOpen);
+  if(isOpen){p.addEventListener('transitionend',function h(){fixAgentScroll();p.removeEventListener('transitionend',h);});}
+  else{var w=document.getElementById('agent-scroll-wrap');if(w)w.style.maxHeight='0';}
 });
 
 /* Filter drawer */
@@ -801,7 +813,7 @@ document.getElementById('fab-new').addEventListener('click',function(){openNewMo
 var lastOnlineTimestamp = new Date().toISOString();
 function offlineGuard() {
   if (!navigator.onLine) {
-    toast('You are offline — changes cannot be saved', 'error');
+    toast('You are offline &#8212; changes cannot be saved', 'error');
     return true; // blocked
   }
   return false; // allow
@@ -871,7 +883,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// User taps the update toast → tell the waiting SW to activate
+// User taps the update toast &#8594; tell the waiting SW to activate
 document.getElementById('sw-update-toast').addEventListener('click', function() {
   if (swUpdateWaiting) {
     swUpdateWaiting.postMessage({ type: 'SKIP_WAITING' });
