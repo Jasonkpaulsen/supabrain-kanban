@@ -311,10 +311,10 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <body>
 
 <!-- Offline staleness banner (SB-186) -->
-<div id="offline-banner">&#9888; OFFLINE &#8212; Viewing cached data as of <span id="offline-ts">&#8212;</span></div>
+<div id="offline-banner">&#9888; OFFLINE — Viewing cached data as of <span id="offline-ts">—</span></div>
 
 <!-- SW update toast (SB-185) -->
-<div id="sw-update-toast">Update available &#8212; tap to refresh</div>
+<div id="sw-update-toast">Update available — tap to refresh</div>
 
 <!-- Login -->
 <div id="login-overlay">
@@ -368,10 +368,10 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
       <button class="b-stats-toggle" id="stats-toggle">Stats <span id="stats-arrow">&#9660;</span></button>
       <div class="b-stats-body" id="stats-body">
         <div class="b-stats-grid">
-          <div class="b-stat"><div class="lbl">Total</div><div class="val" id="bs-total">0</div></div>
-          <div class="b-stat"><div class="lbl">Done</div><div class="val" id="bs-done">0 <small id="bs-pct">0%</small></div></div>
-          <div class="b-stat"><div class="lbl">In Flight</div><div class="val" id="bs-flight">0</div></div>
-          <div class="b-stat"><div class="lbl">Unassigned</div><div class="val" id="bs-unas">0</div></div>
+          <div class="b-stat" data-sf="all" style="cursor:pointer"><div class="lbl">Total</div><div class="val" id="bs-total">0</div></div>
+          <div class="b-stat" data-sf="done" style="cursor:pointer"><div class="lbl">Done</div><div class="val" id="bs-done">0 <small id="bs-pct">0%</small></div></div>
+          <div class="b-stat" data-sf="flight" style="cursor:pointer"><div class="lbl">In Flight</div><div class="val" id="bs-flight">0</div></div>
+          <div class="b-stat" data-sf="unassigned" style="cursor:pointer"><div class="lbl">Unassigned</div><div class="val" id="bs-unas">0</div></div>
         </div>
         <div class="b-progress"><div class="b-progress-bar"><span class="seg-d" id="seg-d" style="width:0"></span><span class="seg-r" id="seg-r" style="width:0"></span><span class="seg-p" id="seg-p" style="width:0"></span></div></div>
       </div>
@@ -450,7 +450,7 @@ var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold
 
 var items=[],projects=[],labels=[],agents=[],agentsById={},projDom={};
 var briefing=null,jobLeads=[],attItems=[];
-var curProj='all',search='',priF='all',domF='all',agentF='all',statusF='all',labelF='all';
+var curProj='all',curPrefix='all',search='',priF='all',domF='all',agentF='all',statusF='all',labelF='all',summaryF='all';
 var curCol='todo',editItem=null,moveItem=null;
 
 async function hdr(){var s=await sb.auth.getSession();var t=s.data.session&&s.data.session.access_token;if(!t)throw new Error('Not auth');return{'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json'};}
@@ -552,9 +552,17 @@ function renderJStats(){
   var total=scope.length,d24=0,c24=0,flagged=0,now=Date.now(),h24=864e5;
   scope.forEach(function(it){if(it.status==='done'&&it.completed_at&&(now-new Date(it.completed_at).getTime())<h24)d24++;if(it.updated_at&&(now-new Date(it.updated_at).getTime())<h24)c24++;});
   if(briefing&&briefing.flags)flagged=briefing.flags.length;
-  document.getElementById('j-stats').innerHTML=donut(d24,total||1,'var(--green)','Done')+donut(c24,total||1,'#f0883e','Changed')+donut(0,10,'#79c0ff','Decided')+donut(flagged,10,'var(--red)','Flagged');
+  var se=document.getElementById('j-stats');
+  se.innerHTML=donut(d24,total||1,'var(--green)','Done','done')+donut(c24,total||1,'#f0883e','Changed','changed')+donut(0,10,'#79c0ff','Decided','decided')+donut(flagged,10,'var(--red)','Flagged','flagged');
+  se.querySelectorAll('.j-stat').forEach(function(card){card.addEventListener('click',function(){
+    var f=card.dataset.filter;summaryF=(summaryF===f)?'all':f;
+    document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.tab==='board');});
+    document.querySelectorAll('.panel').forEach(function(p){p.classList.toggle('active',p.id==='p-board');});
+    document.getElementById('fab-new').classList.add('show');
+    renderBoardContent();
+  });});
 }
-function donut(v,mx,c,lb){var p=mx?Math.min(v/mx,1):0,r=26,ci=2*Math.PI*r,off=ci*(1-p);return'<div class="j-stat"><div class="j-donut"><svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="'+r+'"/><circle class="fl" cx="32" cy="32" r="'+r+'" stroke="'+c+'" stroke-dasharray="'+ci+'" stroke-dashoffset="'+off+'"/></svg></div><div class="j-stat-n" style="color:'+c+'">'+v+'</div><div class="j-stat-l">'+lb+'</div></div>';}
+function donut(v,mx,c,lb,fk){var p=mx?Math.min(v/mx,1):0,r=26,ci=2*Math.PI*r,off=ci*(1-p);return'<div class="j-stat" data-filter="'+fk+'" style="cursor:pointer"><div class="j-donut"><svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="'+r+'"/><circle class="fl" cx="32" cy="32" r="'+r+'" stroke="'+c+'" stroke-dasharray="'+ci+'" stroke-dashoffset="'+off+'"/></svg></div><div class="j-stat-n" style="color:'+c+'">'+v+'</div><div class="j-stat-l">'+lb+'</div></div>';}
 
 function renderPri(){
   var h='';jobLeads.forEach(function(j){h+='<div class="j-card"><div class="j-card-meta"><span class="pri-dot" style="background:var(--green)"></span><span class="badge lead">Job Lead</span></div><div class="j-card-title">'+esc(j.title)+'</div><div class="j-card-desc">'+esc(j.company)+(j.score?' &middot; Score: '+j.score:'')+'</div></div>';});
@@ -584,19 +592,28 @@ function renderBoard(){
 
 function popProjectSelect(){
   var pills=document.getElementById('b-project-pills'),m=document.getElementById('m-proj');
-  pills.innerHTML='<span class="proj-pill'+(curProj==='all'?' active':'')+'" data-project="all">All</span>';
-  m.innerHTML='';
-  projects.forEach(function(p){
-    var shortName=p.name.length>14?p.name.substring(0,12)+'…':p.name;
-    pills.innerHTML+='<span class="proj-pill'+(curProj===p.id?' active':'')+'" data-project="'+p.id+'">'+esc((p.icon||'')+' '+shortName)+'</span>';
-    m.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>';
+  // Build prefix→project mapping from ticket codes (SB-208 fix)
+  var pfxToProj={},pfxCounts={},pfxIcons={};
+  items.forEach(function(it){
+    if(it.ticket_code){var pfx=it.ticket_code.split('-')[0];if(pfx&&it.project_id){pfxToProj[pfx]=it.project_id;pfxCounts[pfx]=(pfxCounts[pfx]||0)+1;if(!pfxIcons[pfx]&&it.project_icon)pfxIcons[pfx]=it.project_icon;}}
+  });
+  var prefixes=Object.keys(pfxCounts).sort();
+  pills.innerHTML='<span class="proj-pill'+(curPrefix==='all'?' active':'')+'" data-prefix="all" data-project="all">All</span>';
+  prefixes.forEach(function(pfx){
+    pills.innerHTML+='<span class="proj-pill'+(curPrefix===pfx?' active':'')+'" data-prefix="'+pfx+'" data-project="'+(pfxToProj[pfx]||'')+'">'+(pfxIcons[pfx]?esc(pfxIcons[pfx])+' ':'')+esc(pfx)+' <small style="opacity:.6;font-weight:400">'+pfxCounts[pfx]+'</small></span>';
   });
   pills.querySelectorAll('.proj-pill').forEach(function(pill){
     pill.addEventListener('click',function(){
-      curProj=pill.dataset.project;
+      curPrefix=pill.dataset.prefix;
+      curProj=pill.dataset.project||'all';
       pills.querySelectorAll('.proj-pill').forEach(function(p){p.classList.toggle('active',p===pill);});
       renderBoardContent();renderProjAuto();
     });
+  });
+  // Populate modal project select
+  m.innerHTML='';
+  projects.forEach(function(p){
+    m.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>';
   });
 }
 function popAgentFilter(){
@@ -624,25 +641,36 @@ function renderColTabs(){
   ct.querySelectorAll('.col-tab').forEach(function(t){t.addEventListener('click',function(){curCol=t.dataset.st;renderColTabs();renderCards();});});
 }
 function filterItems(){
+  var now24=Date.now()-864e5;
   return items.filter(function(it){
-    if(curProj!=='all'&&it.project_id!==curProj)return false;
+    // Project prefix filter (SB-208)
+    if(curPrefix!=='all'){if(!it.ticket_code||it.ticket_code.indexOf(curPrefix+'-')!==0)return false;}
+    else if(curProj!=='all'&&it.project_id!==curProj)return false;
+    // Summary chip filter (SB-209)
+    if(summaryF!=='all'){
+      if(summaryF==='done'&&it.status!=='done')return false;
+      if(summaryF==='changed'&&(!it.updated_at||new Date(it.updated_at).getTime()<now24))return false;
+      if(summaryF==='flagged'&&it.acknowledged!==false)return false;
+      if(summaryF==='flight'&&['todo','in_progress','review','escalated'].indexOf(it.status)===-1)return false;
+      if(summaryF==='unassigned'&&it.agent_name)return false;
+    }
     if(statusF!=='all'&&it.status!==statusF)return false;
     if(priF!=='all'&&it.priority!==priF)return false;
     if(domF!=='all'&&iDom(it)!==domF)return false;
     if(labelF!=='all'&&!(it.labels||[]).some(function(l){return l.name===labelF;}))return false;
     if(agentF==='__un'){if(it.agent_name)return false;}else if(agentF!=='all'){if(it.agent_name!==agentF)return false;}
-    if(search){var q=search.toLowerCase(),hay=[it.title,it.description,it.project_name,it.agent_name].join(' ').toLowerCase();if(hay.indexOf(q)===-1)return false;}
+    if(search){var q=search.toLowerCase(),hay=[it.title,it.description,it.project_name,it.assignee,it.agent_name].join(' ').toLowerCase();if(hay.indexOf(q)===-1)return false;}
     return true;
   });
 }
 function renderBoardContent(){
   renderBoardStats();renderAgents();renderColTabs();renderCards();
-  var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
+  var scope=items.filter(function(i){if(curPrefix!=='all')return i.ticket_code&&i.ticket_code.indexOf(curPrefix+'-')===0;return curProj==='all'||i.project_id===curProj;});
   var filtered=filterItems();
   document.getElementById('fd-count').textContent=filtered.length+' of '+scope.length+' shown';
 }
 function renderBoardStats(){
-  var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
+  var scope=items.filter(function(i){if(curPrefix!=='all')return i.ticket_code&&i.ticket_code.indexOf(curPrefix+'-')===0;return curProj==='all'||i.project_id===curProj;});
   var total=scope.length,byS={backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},unas=0;
   scope.forEach(function(it){if(byS[it.status]!==undefined)byS[it.status]++;if(!it.agent_name)unas++;});
   var flight=byS.todo+byS.in_progress+byS.review+byS.escalated,dp=total?Math.round(byS.done/total*100):0;
@@ -656,7 +684,7 @@ function renderBoardStats(){
   document.getElementById('seg-p').style.width=w(byS.in_progress)+'%';
 }
 function renderAgents(){
-  var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
+  var scope=items.filter(function(i){if(curPrefix!=='all')return i.ticket_code&&i.ticket_code.indexOf(curPrefix+'-')===0;return curProj==='all'||i.project_id===curProj;});
   var byA={},unas=0;
   scope.forEach(function(it){if(!it.assigned_agent_id){unas++;return;}var g=byA[it.assigned_agent_id]||(byA[it.assigned_agent_id]={total:0,st:{backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},name:it.agent_name,icon:it.agent_icon});g.total++;if(g.st[it.status]!==undefined)g.st[it.status]++;});
   var ids=Object.keys(byA);ids.sort(function(a,b){return(byA[b].total-byA[b].st.done)-(byA[a].total-byA[a].st.done);});
@@ -702,8 +730,8 @@ function renderCards(){
     var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">\u{1F4C5} '+it.due_date+'</span>';}
     var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
     var agChip=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
-    var assH=it.assignee?'<span class="card-assignee" title="'+esc(it.assignee)+'">&#128100; '+esc(it.assignee.length>12?it.assignee.substring(0,12)+'…':it.assignee)+'</span>':'';
-    var footR=assH+agChip;if(!footR)footR='<span class="agent-chip unassigned"><span class="av">&#8709;</span>Unassigned</span>';
+    var assH=it.assignee?'<span class="agent-chip" title="'+esc(it.assignee)+'"><span class="av">👤</span>'+esc(it.assignee.length>14?it.assignee.substring(0,14)+'…':it.assignee)+'</span>':'';
+    var footR='';if(assH)footR+=assH;if(agChip)footR+=agChip;if(!footR)footR='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
     var stMap={backlog:['backlog','BACKLOG'],todo:['todo','TO DO'],in_progress:['in-progress','IN PROGRESS'],on_hold:['on-hold','ON HOLD'],blocked:['blocked','BLOCKED'],review:['review','REVIEW'],escalated:['escalated','ESCALATED'],done:['done','DONE']};var stI=stMap[curCol];var stBadge=stI?'<span class="status-badge '+stI[0]+'">'+stI[1]+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
     if(it.ticket_code)h+='<span class="card-code">'+esc(it.ticket_code)+'</span>';
@@ -714,7 +742,7 @@ function renderCards(){
     h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
     var indH='';
     if(it.subtask_total>0){var stPct=Math.round((it.subtask_done||0)/it.subtask_total*100);indH+='<span class="subtask-ind"><span class="subtask-bar"><span style="width:'+stPct+'%"></span></span>'+(it.subtask_done||0)+'/'+it.subtask_total+'</span>';}
-    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">&#128279; '+it.blocked_by.length+'</span>';
+    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">🔗 '+it.blocked_by.length+'</span>';
     if(it.acknowledged===false)indH+='<span class="unack-dot" title="Unacknowledged"></span>';
     if(indH)h+='<div class="card-indicators">'+indH+'</div>';
     h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+'</div><div class="card-foot-right">'+footR+'</div></div></div>';
@@ -784,12 +812,16 @@ document.getElementById('fd-domain').addEventListener('click',function(e){var c=
 document.getElementById('fd-pri').addEventListener('change',function(){priF=this.value;renderBoardContent();});
 document.getElementById('fd-agent').addEventListener('change',function(){agentF=this.value;renderBoardContent();});
 document.getElementById('fd-label').addEventListener('change',function(){labelF=this.value;renderBoardContent();});
-document.getElementById('fd-clear').addEventListener('click',function(){statusF='all';domF='all';priF='all';agentF='all';labelF='all';search='';
+document.getElementById('fd-clear').addEventListener('click',function(){statusF='all';domF='all';priF='all';agentF='all';labelF='all';summaryF='all';search='';curPrefix='all';curProj='all';
   document.getElementById('fd-pri').value='all';document.getElementById('fd-agent').value='all';document.getElementById('fd-label').value='all';document.getElementById('b-search').value='';
   document.querySelectorAll('#fd-status .fd-chip').forEach(function(c){c.classList.toggle('active',c.dataset.s==='all');});
   document.querySelectorAll('#fd-domain .fd-chip').forEach(function(c){c.classList.toggle('active',c.dataset.d==='all');});
+  document.querySelectorAll('#b-project-pills .proj-pill').forEach(function(p){p.classList.toggle('active',p.dataset.prefix==='all');});
+  document.querySelectorAll('.b-stats-grid .b-stat').forEach(function(c){c.style.outline='';});
   renderBoardContent();closeFilters();
 });
+/* Board stat card click handlers (SB-209) */
+document.querySelector('.b-stats-grid').addEventListener('click',function(e){var card=e.target.closest('.b-stat[data-sf]');if(!card)return;var f=card.dataset.sf;summaryF=(summaryF===f||f==='all')?'all':f;document.querySelectorAll('.b-stats-grid .b-stat').forEach(function(c){c.style.outline=(c.dataset.sf===summaryF&&summaryF!=='all')?'2px solid var(--blue)':'';});renderBoardContent();});
 /* Project pills handle their own click events in popProjectSelect() */
 /* Per-project dev-automation toggle (ADR-GOV-001) */
 function renderProjAuto(){
