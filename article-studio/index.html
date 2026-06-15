@@ -79,11 +79,13 @@
   .s-scheduled{background:#241e30;color:var(--violet)}.s-published{background:#0f2a1a;color:#7fe0a8}
   .s-trashed{background:#2a1717;color:var(--red)}
 
+  /* bottom nav */
   nav.bottom{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(20,20,20,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:flex;padding-bottom:var(--safe-b)}
   nav.bottom button{flex:1;background:transparent;border:none;border-radius:0;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0}
   nav.bottom button .ic{font-size:19px;line-height:1}
   nav.bottom button.on{color:var(--gold)}
 
+  /* full-screen sheet */
   .sheet{position:fixed;inset:0;z-index:60;background:var(--bg);transform:translateY(100%);transition:transform .25s ease;display:flex;flex-direction:column}
   .sheet.open{transform:translateY(0)}
   .sheet .shead{position:sticky;top:0;background:rgba(14,14,14,.96);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:calc(12px + var(--safe-t)) 16px 12px;display:flex;align-items:center;gap:12px}
@@ -182,6 +184,8 @@ const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const STATUSES=['draft','in_review','needs_revision','approved','scheduled','published','trashed'];
 const LABELS={draft:'Draft',in_review:'In Review',needs_revision:'Revision',approved:'Approved',scheduled:'Scheduled',published:'Published',trashed:'Trash'};
+/* Canonical filter-tab order (single source of truth — LCE-023). Lifecycle first, then All, Trash dead last. */
+const STATUS_TAB_ORDER=['draft','in_review','needs_revision','approved','scheduled','published','all','trashed'];
 const SLOTS=[
   {dow:3,h:16,m:0,tier:'peak',label:'Wed 4:00 PM — peak of the week'},
   {dow:2,h:10,m:0,tier:'prime',label:'Tue 10:00 AM — morning prime'},
@@ -232,7 +236,7 @@ function renderRecs(){
   document.getElementById('recs').innerHTML=`<h2>Recommendations</h2><ul>${r.map(x=>`<li>${x}</li>`).join('')}</ul>`;
 }
 function renderTabs(){
-  const tabs=[['all','All']].concat(STATUSES.map(s=>[s,LABELS[s]]));
+  const tabs=STATUS_TAB_ORDER.map(k=>[k, k==='all'?'All':LABELS[k]]);
   document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>{
     const n=k==='all'?ARTICLES.filter(a=>a.status!=='trashed').length:countBy(k);
     return `<button class="tab ${FILTER===k?'active':''}" onclick="setFilter('${k}')">${l} <span class="n">${n}</span></button>`;
@@ -252,6 +256,7 @@ async function renderList(){
    </div>`).join('');
 }
 
+/* sheet / detail */
 function openSheet(id){
   const a=ARTICLES.find(x=>x.id===id);if(!a)return;CURRENT=a;
   document.getElementById('sheetTitle').textContent=LABELS[a.status];
@@ -289,6 +294,7 @@ async function destroy(id){if(!confirm('Permanently delete this article?'))retur
 async function markPublished(id){const url=prompt('LinkedIn post URL (optional):','');const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'published',published_url:url||null,feedback_history:pushHist(a,'published',url||'')})){toast('Published');closeSheet();load();}}
 async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').in('article_id',ids);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().in('id',ids);if(error){toast(error.message);return;}await logPurge((arts||[]).map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));toast(`Purged ${ids.length}`);load();}
 
+/* images */
 async function loadArticleImages(articleId){
   const z=document.getElementById('imgZone');if(!z)return;
   const {data,error}=await sb.from('image_assets').select('*').eq('article_id',articleId).in('status',['candidate','accepted']).order('sort_order');
@@ -312,6 +318,7 @@ async function requestNewImages(articleId){const fb=(document.getElementById('im
 async function openLibraryPicker(articleId){const p=document.getElementById('libPick');const {data}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const imgs=data||[];if(!imgs.length){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">No saved images yet.</div>';return;}p.innerHTML='<div class="muted" style="font-size:12px;margin:10px 0 6px">Pick a saved image:</div><div class="imgrid">'+imgs.map(i=>`<div class="imgcard"><img src="${esc(i.public_url)}" onclick="useLibraryImage('${i.id}','${articleId}')"><div class="imgcap">${esc(i.description||i.prompt||'')}</div></div>`).join('')+'</div>';}
 async function useLibraryImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');await sb.from('image_assets').update({status:'accepted',article_id:articleId}).eq('id',id);await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
 
+/* scheduling */
 function nextSlotDate(slot,after){const d=new Date(after.getTime());d.setSeconds(0,0);for(let i=0;i<21;i++){const c=new Date(d.getTime()+i*864e5);if(c.getDay()===slot.dow){c.setHours(slot.h,slot.m,0,0);if(c>after)return c;}}return null;}
 function takenTimes(){return ARTICLES.filter(a=>a.status==='scheduled'&&a.scheduled_for).map(a=>new Date(a.scheduled_for).getTime());}
 function openSchedule(id){
@@ -326,6 +333,7 @@ function openSchedule(id){
 async function confirmSchedule(id,iso,label){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'scheduled',scheduled_for:iso,publish_slot_label:label,approved_by:(a&&a.approved_by)||(USER&&USER.email),approved_at:(a&&a.approved_at)||new Date().toISOString(),feedback_history:pushHist(a,'scheduled',label)})){toast('Scheduled');closeSheet();load();}}
 async function customSchedule(id){const v=document.getElementById('customDt').value;if(!v){toast('Pick a time');return;}await confirmSchedule(id,new Date(v).toISOString(),'Custom time');}
 
+/* views */
 function setView(v){VIEW=v;
   ['board','cal','lib','purged'].forEach(x=>{document.getElementById('n-'+x).classList.toggle('on',x===v);document.getElementById(x+'View').style.display=x===v?'block':'none';});
   if(v==='cal')renderAgenda();if(v==='lib')renderLibrary();if(v==='purged')renderPurged();
@@ -341,9 +349,11 @@ async function renderLibrary(){const {data,error}=await sb.from('image_assets').
 async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data}=await sb.from('image_assets').select('storage_path,description').eq('id',id).single();await deleteStorage([data&&data.storage_path]);const {error}=await sb.from('image_assets').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data&&data.storage_path,title:data&&data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
 async function renderPurged(){const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
 
+/* storage + audit helpers */
 async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);if(!paths.length)return;try{await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets`,{method:'DELETE',headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({prefixes:paths})});}catch(e){}}
 async function logPurge(rows){if(rows&&rows.length)await sb.from('lce_deletion_log').insert(rows.map(r=>({...r,user_id:USER&&USER.id})));}
 
+/* utils */
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function mdRender(src){if(!src||!src.trim())return '<p class="muted">No body text yet. Switch to Edit to add it.</p>';const lines=esc(src).split(/\r?\n/);let html='',inList=false;const inline=s=>s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank">$1</a>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/(^|[^*])\*([^*]+)\*/g,'$1<em>$2</em>');const cl=()=>{if(inList){html+='</ul>';inList=false;}};for(let ln of lines){if(/^\s*[-*]\s+/.test(ln)){if(!inList){html+='<ul>';inList=true;}html+='<li>'+inline(ln.replace(/^\s*[-*]\s+/,''))+'</li>';continue;}cl();if(/^###\s+/.test(ln))html+='<h3>'+inline(ln.replace(/^###\s+/,''))+'</h3>';else if(/^##\s+/.test(ln))html+='<h2>'+inline(ln.replace(/^##\s+/,''))+'</h2>';else if(/^#\s+/.test(ln))html+='<h1>'+inline(ln.replace(/^#\s+/,''))+'</h1>';else if(/^\s*---\s*$/.test(ln))html+='<hr>';else if(ln.trim()==='')html+='';else html+='<p>'+inline(ln)+'</p>';}cl();return html;}
 function fmt(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
