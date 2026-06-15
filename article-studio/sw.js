@@ -1,5 +1,5 @@
 // Article Studio service worker — app-shell cache, network-first for data.
-const CACHE = 'article-studio-v1';
+const CACHE = 'article-studio-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {
