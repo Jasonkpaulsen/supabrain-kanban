@@ -146,7 +146,10 @@
   <div id="offline" class="offline" style="display:none">Offline — showing last loaded data</div>
   <header class="top">
     <div><h1>Article Studio</h1><div class="sub">LinkedIn Content Engine</div></div>
-    <button class="ref" onclick="load()">↻</button>
+    <div style="display:flex;gap:8px">
+      <button class="ref" onclick="openNewArticle()" style="color:var(--gold);font-size:18px;padding:7px 12px" title="New Article">＋</button>
+      <button class="ref" onclick="load()">↻</button>
+    </div>
   </header>
   <div class="app">
     <div class="statbar" id="stats"></div>
@@ -173,6 +176,38 @@
     <button id="n-lib" onclick="setView('lib')"><span class="ic">▣</span>Library</button>
     <button id="n-purged" onclick="setView('purged')"><span class="ic">⌫</span>Purged</button>
   </nav>
+</div>
+
+<div class="sheet" id="newSheet">
+  <div class="shead"><button onclick="closeNewSheet()">‹ Back</button><div class="muted" style="font-size:12px">New Article</div></div>
+  <div class="sbody">
+    <h2 style="font-size:24px;color:var(--gold);margin-bottom:16px">Create Article</h2>
+    <div class="lbl">Title</div>
+    <input id="newTitle" type="text" placeholder="Working title…">
+    <div class="lbl">Content Pillar</div>
+    <select id="newPillar">
+      <option value="">— select —</option>
+      <option value="AI in Enterprise">AI in Enterprise</option>
+      <option value="Technology Leadership">Technology Leadership</option>
+      <option value="Personal Build Stories">Personal Build Stories</option>
+      <option value="Ecommerce & DTC">Ecommerce & DTC</option>
+    </select>
+    <div class="lbl">Slot</div>
+    <select id="newSlot">
+      <option value="">— select —</option>
+      <option value="Monday Deep Dive">Monday Deep Dive (~1,800 words)</option>
+      <option value="Wednesday Reactive">Wednesday Reactive (~1,600 words)</option>
+      <option value="Friday Personal">Friday Personal (~1,500 words)</option>
+    </select>
+    <div class="lbl">Hook</div>
+    <textarea id="newHook" rows="3" placeholder="Opening hook (≤210 chars)…"></textarea>
+    <div class="lbl">Article body (markdown)</div>
+    <textarea id="newBody" rows="8" placeholder="Article text — or leave blank for brief-only…"></textarea>
+  </div>
+  <div class="sactions">
+    <button class="btn-ghost" onclick="closeNewSheet()">Cancel</button>
+    <button class="btn-gold" onclick="createArticle()">Create Draft</button>
+  </div>
 </div>
 
 <div class="sheet" id="sheet"><div class="shead"><button onclick="closeSheet()">‹ Back</button><div id="sheetTitle" class="muted" style="font-size:12px"></div></div><div class="sbody" id="sheetBody"></div><div class="sactions" id="sheetActions"></div></div>
@@ -360,6 +395,43 @@ function fmt(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleDateSt
 function tm(iso){return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
 function sameDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
 let toastT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);}
+
+/* new article */
+function openNewArticle(){
+  document.getElementById('newTitle').value='';
+  document.getElementById('newPillar').value='';
+  document.getElementById('newSlot').value='';
+  document.getElementById('newHook').value='';
+  document.getElementById('newBody').value='';
+  document.getElementById('newSheet').classList.add('open');
+}
+function closeNewSheet(){document.getElementById('newSheet').classList.remove('open');}
+async function createArticle(){
+  const title=document.getElementById('newTitle').value.trim();
+  if(!title){toast('Title is required');return;}
+  const pillar=document.getElementById('newPillar').value;
+  const slot=document.getElementById('newSlot').value;
+  const hook=document.getElementById('newHook').value.trim();
+  const body=document.getElementById('newBody').value.trim();
+  const wc=body?body.split(/\s+/).length:0;
+  const row={
+    user_id:USER.id,
+    title,
+    pillar:pillar||null,
+    hook:hook||null,
+    body_md:body||null,
+    word_count:wc||null,
+    status:'draft',
+    publish_slot_label:slot||null,
+    source:'article-studio',
+    meta:{created_via:'article-studio-pwa',created_at:new Date().toISOString()}
+  };
+  const {error}=await sb.from('articles').insert(row);
+  if(error){toast('Error: '+error.message);return;}
+  toast('Draft created');
+  closeNewSheet();
+  await load();
+}
 
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
 </script>
