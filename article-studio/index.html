@@ -267,6 +267,8 @@ function renderRecs(){
   if(au)r.push(`<b>${au}</b> approved, not yet scheduled.`);
   if(next<2)r.push(`Only <b>${next}</b> post(s) scheduled next 7 days — target 2×/week.`);
   if(dr)r.push(`<b>${dr}</b> draft(s) in the pipeline.`);
+  const pipeline=ARTICLES.filter(a=>!['published','trashed'].includes(a.status)).length;
+  if(pipeline<5)r.push(`Pipeline has <b>${pipeline}</b> active article(s) — target is <b>5</b>. Request a sweep.`);
   r.push(`Best windows: <b>Wed 4 PM</b>, then Tue/Thu. Avoid weekends.`);
   document.getElementById('recs').innerHTML=`<h2>Recommendations</h2><ul>${r.map(x=>`<li>${x}</li>`).join('')}</ul>`;
 }
@@ -313,7 +315,7 @@ function openSheet(id){
   const inTrash=a.status==='trashed';
   document.getElementById('sheetActions').innerHTML=inTrash
    ?`<button class="btn-gold" onclick="restore('${a.id}')">♻ Restore</button><button class="btn-danger" onclick="destroy('${a.id}')">✕ Delete</button>`
-   :`<button class="btn-gold" onclick="approve('${a.id}')">✓ Approve</button><button class="btn-ghost" onclick="sendRevision('${a.id}')">↻ Revise</button><button class="btn-ghost" onclick="openSchedule('${a.id}')">📅 Schedule</button>${(a.status==='scheduled'||a.status==='approved')?`<button class="btn-ghost" onclick="markPublished('${a.id}')">🚀 Published</button>`:`<button class="btn-ghost" onclick="toast('Approve or schedule first')">🚀 Published</button>`}<button class="btn-danger full" onclick="trash('${a.id}')">🗑 Move to Trash</button>`;
+   :`${(a.status!=='approved'&&a.status!=='scheduled')?`<button class="btn-gold" onclick="approve('${a.id}')">✓ Approve</button>`:''}${a.status!=='draft'?`<button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Draft</button>`:''}<button class="btn-ghost" onclick="sendRevision('${a.id}')">↻ Revise</button><button class="btn-ghost" onclick="openSchedule('${a.id}')">📅 Schedule</button>${(a.status==='scheduled'||a.status==='approved')?`<button class="btn-ghost" onclick="markPublished('${a.id}')">🚀 Published</button>`:''}<button class="btn-danger full" onclick="trash('${a.id}')">🗑 Move to Trash</button>`;
   document.getElementById('sheet').classList.add('open');
   loadArticleImages(a.id);
 }
@@ -323,6 +325,7 @@ async function saveBody(id){const b=document.getElementById('body').value;if(awa
 function pushHist(a,action,note){const h=(a.feedback_history||[]).slice();h.push({at:new Date().toISOString(),action,note:note||'',by:USER&&USER.email});return h;}
 async function sendRevision(id){const a=ARTICLES.find(x=>x.id===id);const fb=document.getElementById('fb').value.trim();if(!fb){toast('Add feedback first');return;}if(await patch(id,{status:'needs_revision',editorial_feedback:fb,revision_count:(a.revision_count||0)+1,feedback_history:pushHist(a,'revision requested',fb)})){toast('Sent for revision');closeSheet();load();}}
 async function approve(id){const a=ARTICLES.find(x=>x.id===id);const fb=document.getElementById('fb').value.trim();if(await patch(id,{status:'approved',approved_by:USER&&USER.email,approved_at:new Date().toISOString(),editorial_feedback:fb||a.editorial_feedback,feedback_history:pushHist(a,'approved',fb)})){toast('Approved');closeSheet();load();}}
+async function backToDraft(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',approved_by:null,approved_at:null,scheduled_for:null,publish_slot_label:null,feedback_history:pushHist(a,'returned to draft','')})){toast('Returned to draft');closeSheet();load();}}
 async function trash(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'trashed',feedback_history:pushHist(a,'moved to trash','')})){toast('Moved to trash');closeSheet();load();}}
 async function restore(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',feedback_history:pushHist(a,'restored','')})){toast('Restored');closeSheet();load();}}
 async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').eq('article_id',id);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast('Deleted');closeSheet();load();}
