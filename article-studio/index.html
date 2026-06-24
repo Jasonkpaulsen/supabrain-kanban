@@ -267,8 +267,10 @@ function renderRecs(){
   if(au)r.push(`<b>${au}</b> approved, not yet scheduled.`);
   if(next<2)r.push(`Only <b>${next}</b> post(s) scheduled next 7 days — target 2×/week.`);
   if(dr)r.push(`<b>${dr}</b> draft(s) in the pipeline.`);
-  const pipeline=ARTICLES.filter(a=>!['published','trashed'].includes(a.status)).length;
-  if(pipeline<5)r.push(`Pipeline has <b>${pipeline}</b> active article(s) — target is <b>5</b>. Request a sweep.`);
+  const drafts=ARTICLES.filter(a=>a.status==='draft').length;
+  if(drafts<5)r.push(`Only <b>${drafts}</b> draft(s) in pipeline — target is <b>5</b>. Sweep will replenish.`);
+  const reviewable=ARTICLES.filter(a=>a.status==='in_review').length;
+  if(reviewable)r.push(`<b>${reviewable}</b> article(s) ready for your review.`);
   r.push(`Best windows: <b>Wed 4 PM</b>, then Tue/Thu. Avoid weekends.`);
   document.getElementById('recs').innerHTML=`<h2>Recommendations</h2><ul>${r.map(x=>`<li>${x}</li>`).join('')}</ul>`;
 }
