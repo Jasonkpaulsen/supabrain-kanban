@@ -267,10 +267,13 @@ function renderRecs(){
   if(au)r.push(`<b>${au}</b> approved, not yet scheduled.`);
   if(next<2)r.push(`Only <b>${next}</b> post(s) scheduled next 7 days — target 2×/week.`);
   if(dr)r.push(`<b>${dr}</b> draft(s) in the pipeline.`);
-  const drafts=ARTICLES.filter(a=>a.status==='draft').length;
-  if(drafts<5)r.push(`Only <b>${drafts}</b> draft(s) in pipeline — target is <b>5</b>. Sweep will replenish.`);
-  const reviewable=ARTICLES.filter(a=>a.status==='in_review').length;
-  if(reviewable)r.push(`<b>${reviewable}</b> article(s) ready for your review.`);
+  const ideas=ARTICLES.filter(a=>a.status==='draft').length;
+  if(ideas)r.push(`<b>${ideas}</b> idea(s) waiting for your approval to write.`);
+  if(ideas<5)r.push(`Only <b>${ideas}</b> idea(s) in pipeline — target is <b>5</b>. Sweep will replenish.`);
+  const awaitWrite=ARTICLES.filter(a=>a.status==='approved'&&(!a.body_md||!a.body_md.trim())).length;
+  if(awaitWrite)r.push(`<b>${awaitWrite}</b> approved idea(s) queued for Content Writer.`);
+  const reviewable=ARTICLES.filter(a=>a.status==='in_review'||(a.status==='approved'&&a.body_md&&a.body_md.trim())).length;
+  if(reviewable)r.push(`<b>${reviewable}</b> article(s) ready for editorial review.`);
   r.push(`Best windows: <b>Wed 4 PM</b>, then Tue/Thu. Avoid weekends.`);
   document.getElementById('recs').innerHTML=`<h2>Recommendations</h2><ul>${r.map(x=>`<li>${x}</li>`).join('')}</ul>`;
 }
@@ -314,10 +317,16 @@ function openSheet(id){
     <textarea id="fb" rows="3" placeholder="Feedback for refactor / reprocess…">${esc(a.editorial_feedback||'')}</textarea>
     ${hist.length?`<div class="lbl">History (${hist.length})</div>${hist.map(h=>`<div style="border-left:2px solid var(--line);padding-left:12px;margin-bottom:10px"><div class="meta" style="font-size:10px;text-transform:uppercase">${fmt(h.at)} · ${esc(h.action||'')}</div><div style="font-size:13px">${esc(h.note||'')}</div></div>`).join('')}`:''}
   `;
-  const inTrash=a.status==='trashed';
-  document.getElementById('sheetActions').innerHTML=inTrash
-   ?`<button class="btn-gold" onclick="restore('${a.id}')">♻ Restore</button><button class="btn-danger" onclick="destroy('${a.id}')">✕ Delete</button>`
-   :`${(a.status!=='approved'&&a.status!=='scheduled')?`<button class="btn-gold" onclick="approve('${a.id}')">✓ Approve</button>`:''}${a.status!=='draft'?`<button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Draft</button>`:''}<button class="btn-ghost" onclick="sendRevision('${a.id}')">↻ Revise</button><button class="btn-ghost" onclick="openSchedule('${a.id}')">📅 Schedule</button>${(a.status==='scheduled'||a.status==='approved')?`<button class="btn-ghost" onclick="markPublished('${a.id}')">🚀 Published</button>`:''}<button class="btn-danger full" onclick="trash('${a.id}')">🗑 Move to Trash</button>`;
+  const inTrash=a.status==='trashed';const hasBody=a.body_md&&a.body_md.trim().length>0;
+  let acts='';
+  if(inTrash){acts=`<button class="btn-gold" onclick="restore('${a.id}')">♻ Restore</button><button class="btn-danger" onclick="destroy('${a.id}')">✕ Delete</button>`;}
+  else if(a.status==='draft'){acts=`<button class="btn-gold" onclick="approveForWriting('${a.id}')">✓ Approve for Writing</button><button class="btn-ghost" onclick="sendRevision('${a.id}')">↻ Revise Idea</button><button class="btn-danger full" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  else if(a.status==='approved'&&!hasBody){acts=`<div class="full" style="text-align:center;color:var(--amber);font-size:13px;padding:6px 0">⏳ Queued for Content Writer</div><button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Back to Draft</button><button class="btn-danger" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  else if(a.status==='in_review'||(a.status==='approved'&&hasBody)){acts=`<button class="btn-gold" onclick="openSchedule('${a.id}')">📅 Schedule</button><button class="btn-ghost" onclick="sendRevision('${a.id}')">↻ Revise</button><button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Back to Draft</button><button class="btn-danger full" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  else if(a.status==='needs_revision'){acts=`<button class="btn-gold" onclick="approveForWriting('${a.id}')">✓ Re-approve</button><button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Back to Draft</button><button class="btn-danger full" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  else if(a.status==='scheduled'){acts=`<button class="btn-ghost" onclick="markPublished('${a.id}')">🚀 Published</button><button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Back to Draft</button><button class="btn-danger full" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  else{acts=`<button class="btn-ghost" onclick="backToDraft('${a.id}')">↩ Back to Draft</button><button class="btn-danger full" onclick="trash('${a.id}')">🗑 Trash</button>`;}
+  document.getElementById('sheetActions').innerHTML=acts;
   document.getElementById('sheet').classList.add('open');
   loadArticleImages(a.id);
 }
@@ -327,6 +336,7 @@ async function saveBody(id){const b=document.getElementById('body').value;if(awa
 function pushHist(a,action,note){const h=(a.feedback_history||[]).slice();h.push({at:new Date().toISOString(),action,note:note||'',by:USER&&USER.email});return h;}
 async function sendRevision(id){const a=ARTICLES.find(x=>x.id===id);const fb=document.getElementById('fb').value.trim();if(!fb){toast('Add feedback first');return;}if(await patch(id,{status:'needs_revision',editorial_feedback:fb,revision_count:(a.revision_count||0)+1,feedback_history:pushHist(a,'revision requested',fb)})){toast('Sent for revision');closeSheet();load();}}
 async function approve(id){const a=ARTICLES.find(x=>x.id===id);const fb=document.getElementById('fb').value.trim();if(await patch(id,{status:'approved',approved_by:USER&&USER.email,approved_at:new Date().toISOString(),editorial_feedback:fb||a.editorial_feedback,feedback_history:pushHist(a,'approved',fb)})){toast('Approved');closeSheet();load();}}
+async function approveForWriting(id){const a=ARTICLES.find(x=>x.id===id);const fb=document.getElementById('fb').value.trim();if(await patch(id,{status:'approved',approved_by:USER&&USER.email,approved_at:new Date().toISOString(),editorial_feedback:fb||a.editorial_feedback,feedback_history:pushHist(a,'idea approved for writing',fb||'Blessed for Content Writer')})){toast('Approved for writing');closeSheet();load();}}
 async function backToDraft(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',approved_by:null,approved_at:null,scheduled_for:null,publish_slot_label:null,feedback_history:pushHist(a,'returned to draft','')})){toast('Returned to draft');closeSheet();load();}}
 async function trash(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'trashed',feedback_history:pushHist(a,'moved to trash','')})){toast('Moved to trash');closeSheet();load();}}
 async function restore(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',feedback_history:pushHist(a,'restored','')})){toast('Restored');closeSheet();load();}}
