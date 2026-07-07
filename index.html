@@ -571,7 +571,7 @@ function renderJarvis(){
 
   var cal=document.getElementById('j-cal'),dow=now.getDay(),mon=new Date(now);mon.setDate(now.getDate()-(dow===0?6:dow-1));
   cal.innerHTML='';
-  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'"><span class="dl">'+days[d.getDay()]+'</span><span class="dn">'+d.getDate()+'</span></div>';}
+  for(var i=0;i<7;i++){var d=new Date(mon);d.setDate(mon.getDate()+i);var isT=d.toDateString()===now.toDateString();cal.innerHTML+='<div class="j-cal-day'+(isT?' today':'')+'">'+'<span class="dl">'+days[d.getDay()]+'</span>'+'<span class="dn">'+d.getDate()+'</span>'+'</div>';}
 
   var pc={};items.forEach(function(it){pc[it.project_id]=(pc[it.project_id]||0)+1;});
   var sp=projects.slice().sort(function(a,b){return(pc[b.id]||0)-(pc[a.id]||0);}).slice(0,6);
@@ -619,7 +619,7 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'">&lt;/span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'">'+'</span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
@@ -752,7 +752,7 @@ function popLabelFilter(){
 }
 function popDomainChips(){
   var c=document.getElementById('fd-domain');c.innerHTML='<span class="fd-chip active" data-d="all" style="background:var(--card)">All</span>';
-  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'">&lt;/span>'+esc(p.domain)+'</span>';}});
+  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'">'+'</span>'+esc(p.domain)+'</span>';}});
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
@@ -818,7 +818,7 @@ function renderAgents(){
     var bar=STATUSES.map(function(st){var w=g.total?(g.st[st]/g.total*100):0;return w?'<span class="ab-'+st+'" style="width:'+w+'%"></span>':'';}).join('');
     var aOn=(meta.automation_enabled!==false);
     var aTgl=meta.id?'<button class="auto-tgl'+(aOn?' on':'')+'" data-agent-id="'+esc(meta.id)+'" data-on="'+(aOn?1:0)+'"'+(!navigator.onLine?' disabled':'')+'>auto '+(aOn?'on':'off')+'</button>':'';
-    h+='<div class="ag-card"><div class="ag-top"><div class="ag-av">'+esc(meta.icon||g.icon||'')+'</div><div class="ag-name">'+esc(meta.name||g.name||'Agent')+'</div>'+aTgl+'<span class="ag-status '+(meta.status||'active')+'">'+( meta.status||'active')+'</span></div><div class="ag-load"><span class="n">'+open+'</span><span class="l">open &middot; '+g.total+' total</span></div><div class="ag-bar">'+bar+'</div></div>';
+    h+='<div class="ag-card"><div class="ag-top"><div class="ag-av">'+esc(meta.icon||g.icon||'')+'</div><div class="ag-name">'+esc(meta.name||g.name||'Agent')+'</div>'+aTgl+'<span class="ag-status '+(meta.status||'active')+'">'+(meta.status||'active')+'</span></div><div class="ag-load"><span class="n">'+open+'</span><span class="l">open &middot; '+g.total+' total</span></div><div class="ag-bar">'+bar+'</div></div>';
   });
   if(unas>0)h+='<div class="ag-card" style="border-style:dashed"><div class="ag-top"><div class="ag-av">&empty;</div><div class="ag-name">Unassigned</div><span class="ag-status" style="color:var(--tx-m);background:var(--sf)">gap</span></div><div class="ag-load"><span class="n">'+unas+'</span><span class="l">need an owner</span></div></div>';
   var ag=document.getElementById('agent-grid');
@@ -851,10 +851,10 @@ function renderCards(){
   filtered.forEach(function(it){
     var dom=iDom(it),stripe=dom?(DC[dom]||'var(--tx-d)'):'var(--tx-d)';
     var lbs='';if(it.labels&&it.labels.length)it.labels.forEach(function(lb){lbs+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">\u{1F4C5} '+it.due_date+'</span>';}
-    var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
+    var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">'+'\u{1F4C5} '+it.due_date+'</span>';}
+    var cmtH=it.comment_count>0?'<span>'+'\u{1F4AC} '+it.comment_count+'</span>':'';
     var agChip=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
-    var assH=it.assignee?'<span class="agent-chip" title="'+esc(it.assignee)+'"><span class="av">\u{1F464}</span>'+esc(it.assignee.length>14?it.assignee.substring(0,14)+'…':it.assignee)+'</span>':'';
+    var assH=it.assignee?'<span class="agent-chip" title="'+esc(it.assignee)+'"><span class="av">👤</span>'+esc(it.assignee.length>14?it.assignee.substring(0,14)+'…':it.assignee)+'</span>':'';
     var footR='';if(assH)footR+=assH;if(agChip)footR+=agChip;if(!footR)footR='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
     var stMap={backlog:['backlog','BACKLOG'],todo:['todo','TO DO'],in_progress:['in-progress','IN PROGRESS'],on_hold:['on-hold','ON HOLD'],blocked:['blocked','BLOCKED'],review:['review','REVIEW'],escalated:['escalated','ESCALATED'],done:['done','DONE']};var stI=stMap[curCol];var stBadge=stI?'<span class="status-badge '+stI[0]+'">'+stI[1]+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
@@ -866,7 +866,7 @@ function renderCards(){
     h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
     var indH='';
     if(it.subtask_total>0){var stPct=Math.round((it.subtask_done||0)/it.subtask_total*100);indH+='<span class="subtask-ind"><span class="subtask-bar"><span style="width:'+stPct+'%"></span></span>'+(it.subtask_done||0)+'/'+it.subtask_total+'</span>';}
-    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">\u{1F517} '+it.blocked_by.length+'</span>';
+    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">🔗 '+it.blocked_by.length+'</span>';
     if(it.acknowledged===false)indH+='<span class="unack-dot" title="Unacknowledged"></span>';
     if(indH)h+='<div class="card-indicators">'+indH+'</div>';
     h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+'</div><div class="card-foot-right">'+footR+'</div></div></div>';
