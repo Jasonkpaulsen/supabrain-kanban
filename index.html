@@ -306,6 +306,43 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .modal-code-badge { font-size: 11px; font-weight: 700; color: var(--blue); font-family: 'SF Mono', monospace; background: rgba(88,166,255,0.1); padding: 2px 8px; border-radius: 4px; }
 .modal-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .modal-timestamps { font-size: 10px; color: var(--tx-d); margin-bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+/* === PORTFOLIO PULSE (SB-258) === */
+.pulse-section{margin:0 16px 16px;}
+.pulse-hdr{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--div);font-family:'SF Mono',monospace;color:var(--teal);cursor:pointer;display:flex;align-items:center;justify-content:space-between;}
+.pulse-hdr .arrow{font-size:10px;transition:transform .2s;}
+.pulse-hdr .arrow.collapsed{transform:rotate(-90deg);}
+.pulse-body{overflow:hidden;transition:max-height .3s ease;max-height:800px;}
+.pulse-body.collapsed{max-height:0 !important;}
+.pulse-gap{background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.3);border-radius:var(--r);padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+.pulse-gap-text{font-size:12px;color:var(--orange);font-weight:600;flex-shrink:0;}
+.pulse-gap-chips{display:flex;gap:4px;flex-wrap:wrap;flex:1;}
+.pulse-gap-chip{font-size:10px;background:rgba(210,153,34,.18);color:var(--orange);padding:2px 8px;border-radius:12px;font-family:'SF Mono',monospace;}
+.pulse-gap-x{background:none;border:none;color:var(--tx-d);font-size:16px;cursor:pointer;padding:2px 6px;flex-shrink:0;}
+.pulse-cards{display:flex;gap:8px;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.pulse-cards::-webkit-scrollbar{display:none;}
+.pulse-card{flex:0 0 auto;min-width:200px;max-width:260px;background:var(--sf);border:1px solid var(--card-b);border-radius:var(--r);padding:10px 12px;border-left:3px solid var(--teal);}
+.pulse-card-title{font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pulse-card-meta{font-size:11px;color:var(--tx-m);}
+.badge.top-pri{background:rgba(45,212,191,.15);color:var(--teal);}
+.pulse-tabs-bar{display:flex;gap:0;margin-bottom:0;border-bottom:1px solid var(--div);}
+.pulse-tab{padding:8px 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--tx-d);cursor:pointer;border-bottom:2px solid transparent;font-family:'SF Mono',monospace;background:none;border-top:none;border-left:none;border-right:none;}
+.pulse-tab.active{color:var(--teal);border-bottom-color:var(--teal);}
+.pulse-table{width:100%;border-collapse:collapse;margin-top:8px;margin-bottom:4px;}
+.pulse-table th{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx-d);text-align:left;padding:6px 8px;border-bottom:1px solid var(--div);font-family:'SF Mono',monospace;}
+.pulse-table td{font-size:12px;padding:6px 8px;border-bottom:1px solid var(--div);color:var(--tx);}
+.pulse-table tr:last-child td{border-bottom:none;}
+.pulse-pill{font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;display:inline-block;}
+.pulse-pill.active{background:rgba(63,185,80,.15);color:var(--green);}
+.pulse-pill.stalled{background:rgba(210,153,34,.15);color:var(--orange);}
+.pulse-pill.blocked{background:rgba(248,81,73,.15);color:var(--red);}
+.pulse-pill.healthy{background:rgba(63,185,80,.15);color:var(--green);}
+.pulse-pill.new{background:rgba(88,166,255,.15);color:var(--blue);}
+.pulse-vel{font-size:10px;}
+.age-badge{font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;}
+.age-badge.green{background:rgba(63,185,80,.15);color:var(--green);}
+.age-badge.yellow{background:rgba(210,153,34,.15);color:var(--orange);}
+.age-badge.red{background:rgba(248,81,73,.15);color:var(--red);}
+@media(max-width:600px){.pulse-cards{flex-direction:column;}.pulse-card{min-width:0;max-width:none;}}
 </style>
 </head>
 <body>
@@ -349,6 +386,16 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
       <div class="j-chips" id="j-chips"></div>
       <div class="j-cal" id="j-cal"></div>
       <div class="j-projs" id="j-projs"></div>
+      <!-- Portfolio Pulse (SB-258) -->
+      <div class="pulse-section" id="sec-pulse" style="display:none">
+        <div class="pulse-hdr" id="pulse-toggle">Portfolio Pulse <span class="arrow" id="pulse-arrow">&#9662;</span></div>
+        <div class="pulse-body" id="pulse-body">
+          <div id="pulse-gap-banner"></div>
+          <div class="pulse-cards" id="pulse-top3"></div>
+          <div class="pulse-tabs-bar" id="pulse-tabs-bar"></div>
+          <div id="pulse-tab-content"></div>
+        </div>
+      </div>
       <div class="j-narrative" id="j-narr">Loading briefing...</div>
       <div class="j-stats" id="j-stats"></div>
       <div class="j-section" id="sec-pri"><div class="j-sh pri">Priority Items</div><div id="j-pri"></div></div>
@@ -452,6 +499,7 @@ var items=[],projects=[],labels=[],agents=[],agentsById={},projDom={};
 var briefing=null,jobLeads=[],attItems=[];
 var curProj='all',curPrefix='all',search='',priF='all',domF='all',agentF='all',statusF='all',labelF='all',summaryF='all';
 var curCol='todo',editItem=null,moveItem=null;
+var pulseDismissed=false,pulseTab='pipeline'; /* SB-258 session state */
 
 async function hdr(){var s=await sb.auth.getSession();var t=s.data.session&&s.data.session.access_token;if(!t)throw new Error('Not auth');return{'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json'};}
 function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
@@ -532,7 +580,7 @@ function renderJarvis(){
 
   document.getElementById('j-narr').textContent=briefing&&briefing.narrative_summary?briefing.narrative_summary:'No briefing available. Run the JARVIS sweep to generate one.';
 
-  renderJStats();renderPri();renderAtt();renderRecs();
+  renderJStats();renderPri();renderAtt();renderRecs();renderPulse();
 }
 
 function getJDom(){var c=document.querySelector('#j-chips .j-chip.active');return c?c.dataset.d:'all';}
@@ -571,15 +619,91 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
-  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
+  fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'">&lt;/span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
   document.getElementById('j-att').innerHTML=h;
 }
 function renderRecs(){
   var h='';
-  if(briefing&&briefing.recommendations){briefing.recommendations.forEach(function(r){h+='<div class="j-rec"><span class="j-rec-pri '+(r.priority||'medium')+'">'+esc(r.priority||'medium')+'</span><div><div class="j-rec-text">'+esc(r.text)+'</div>'+(r.project_key?'<div class="j-rec-key">'+esc(r.project_key)+(r.related_ticket_code?' &middot; '+r.related_ticket_code:'')+'</div>':'')+'</div></div>';});}
+  /* SB-258: badge deduped pulse items as Top Priority */
+  var pulseTopTitles=[];
+  if(briefing&&briefing.meta&&briefing.meta.portfolio_pulse&&briefing.meta.portfolio_pulse.top_priorities){
+    pulseTopTitles=briefing.meta.portfolio_pulse.top_priorities.map(function(p){return p.title||'';});
+  }
+  if(briefing&&briefing.recommendations){briefing.recommendations.forEach(function(r){
+    var isTop=pulseTopTitles.some(function(t){return t&&r.text&&r.text.indexOf(t)!==-1;});
+    h+='<div class="j-rec"><span class="j-rec-pri '+(r.priority||'medium')+'">'+esc(r.priority||'medium')+'</span><div><div class="j-rec-text">'+esc(r.text)+(isTop?' <span class="badge top-pri">Top Priority</span>':'')+'</div>'+(r.project_key?'<div class="j-rec-key">'+esc(r.project_key)+(r.related_ticket_code?' &middot; '+r.related_ticket_code:'')+'</div>':'')+'</div></div>';});}
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">No recommendations.</div>';
   document.getElementById('j-recs').innerHTML=h;
+}
+
+/* ═══ PORTFOLIO PULSE (SB-258) ═══ */
+function renderPulse(){
+  var sec=document.getElementById('sec-pulse');
+  var pulse=briefing&&briefing.meta&&briefing.meta.portfolio_pulse;
+  if(!pulse){sec.style.display='none';return;}
+  sec.style.display='block';
+
+  /* DR-4: PM gap alert banner */
+  var gaps=pulse.pm_gaps||[];
+  var gapEl=document.getElementById('pulse-gap-banner');
+  if(gaps.length>0&&!pulseDismissed){
+    var chips=gaps.map(function(g){return'<span class="pulse-gap-chip">'+esc(g)+'</span>';}).join('');
+    gapEl.innerHTML='<div class="pulse-gap"><span class="pulse-gap-text">&#9888; '+gaps.length+' PM gap'+(gaps.length>1?'s':'')+'</span><div class="pulse-gap-chips">'+chips+'</div><button class="pulse-gap-x" id="pulse-gap-dismiss">&times;</button></div>';
+    gapEl.style.display='block';
+    var db=document.getElementById('pulse-gap-dismiss');
+    if(db)db.addEventListener('click',function(){pulseDismissed=true;gapEl.style.display='none';});
+  }else{gapEl.style.display='none';}
+
+  /* DR-1+DR-5: Top-3 priority cards — dedup against recommendations */
+  var top3=pulse.top_priorities||[];
+  var recTexts=(briefing.recommendations||[]).map(function(r){return r.text||'';});
+  var t3h='';
+  top3.slice(0,3).forEach(function(item){
+    var inRecs=recTexts.some(function(t){return t&&item.title&&t.indexOf(item.title)!==-1;});
+    if(inRecs)return; /* show only in recs with Top Priority badge */
+    var pillCls=(item.status||'').toLowerCase().replace(/\s+/g,'-');
+    t3h+='<div class="pulse-card"><div class="pulse-card-title">'+esc(item.title||'')+'</div><div class="pulse-card-meta">'+esc(item.project||'')+(item.status?' &middot; <span class="pulse-pill '+esc(pillCls)+'">'+esc(item.status)+'</span>':'')+'</div></div>';
+  });
+  document.getElementById('pulse-top3').innerHTML=t3h||'<div style="color:var(--tx-d);font-size:12px;padding:4px 0">No top priorities.</div>';
+
+  /* DR-2+DR-3: Tabbed data panel */
+  renderPulseTabs(pulse);
+
+  /* Collapse toggle */
+  document.getElementById('pulse-toggle').onclick=function(){
+    var body=document.getElementById('pulse-body'),arrow=document.getElementById('pulse-arrow');
+    body.classList.toggle('collapsed');arrow.classList.toggle('collapsed');
+  };
+}
+
+function renderPulseTabs(pulse){
+  var bar=document.getElementById('pulse-tabs-bar');
+  bar.innerHTML='<button class="pulse-tab'+(pulseTab==='pipeline'?' active':'')+'" data-pt="pipeline">Pipeline</button>'+'<button class="pulse-tab'+(pulseTab==='blockers'?' active':'')+'" data-pt="blockers">Blockers</button>';
+  bar.querySelectorAll('.pulse-tab').forEach(function(t){
+    t.addEventListener('click',function(){pulseTab=t.dataset.pt;renderPulseTabs(pulse);});
+  });
+  var ct=document.getElementById('pulse-tab-content');
+  if(pulseTab==='pipeline'){
+    var rows=pulse.pipeline||[];
+    var h='<table class="pulse-table"><thead><tr><th>Domain</th><th>Status</th><th>Velocity</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var cls=(r.status||'').toLowerCase().replace(/\s+/g,'-');
+      h+='<tr><td>'+esc(r.domain||r.project||'')+'</td><td><span class="pulse-pill '+esc(cls)+'">'+esc(r.status||'—')+'</span></td><td class="pulse-vel">'+esc(r.velocity||'—')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    ct.innerHTML=rows.length?h:'<div style="color:var(--tx-d);font-size:12px;padding:8px 0">No pipeline data.</div>';
+  }else{
+    var rows=pulse.blockers||[];
+    var h='<table class="pulse-table"><thead><tr><th>Item</th><th>Age</th><th>Owner</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var days=r.age_days||0;
+      var ac=days<3?'green':days<=7?'yellow':'red';
+      h+='<tr><td>'+esc(r.title||r.item||'')+'</td><td><span class="age-badge '+ac+'">'+days+'d</span></td><td>'+esc(r.owner||'—')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    ct.innerHTML=rows.length?h:'<div style="color:var(--tx-d);font-size:12px;padding:8px 0">No blockers.</div>';
+  }
 }
 
 /* ═══ BOARD TAB ═══ */
@@ -628,7 +752,7 @@ function popLabelFilter(){
 }
 function popDomainChips(){
   var c=document.getElementById('fd-domain');c.innerHTML='<span class="fd-chip active" data-d="all" style="background:var(--card)">All</span>';
-  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'"></span>'+esc(p.domain)+'</span>';}});
+  var seen={};projects.forEach(function(p){if(p.domain&&!seen[p.domain]){seen[p.domain]=true;c.innerHTML+='<span class="fd-chip" data-d="'+p.domain+'"><span class="dot" style="background:'+(DC[p.domain]||'var(--tx-d)')+'">&lt;/span>'+esc(p.domain)+'</span>';}});
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
@@ -694,7 +818,7 @@ function renderAgents(){
     var bar=STATUSES.map(function(st){var w=g.total?(g.st[st]/g.total*100):0;return w?'<span class="ab-'+st+'" style="width:'+w+'%"></span>':'';}).join('');
     var aOn=(meta.automation_enabled!==false);
     var aTgl=meta.id?'<button class="auto-tgl'+(aOn?' on':'')+'" data-agent-id="'+esc(meta.id)+'" data-on="'+(aOn?1:0)+'"'+(!navigator.onLine?' disabled':'')+'>auto '+(aOn?'on':'off')+'</button>':'';
-    h+='<div class="ag-card"><div class="ag-top"><div class="ag-av">'+esc(meta.icon||g.icon||'')+'</div><div class="ag-name">'+esc(meta.name||g.name||'Agent')+'</div>'+aTgl+'<span class="ag-status '+(meta.status||'active')+'">'+(meta.status||'active')+'</span></div><div class="ag-load"><span class="n">'+open+'</span><span class="l">open &middot; '+g.total+' total</span></div><div class="ag-bar">'+bar+'</div></div>';
+    h+='<div class="ag-card"><div class="ag-top"><div class="ag-av">'+esc(meta.icon||g.icon||'')+'</div><div class="ag-name">'+esc(meta.name||g.name||'Agent')+'</div>'+aTgl+'<span class="ag-status '+(meta.status||'active')+'">'+( meta.status||'active')+'</span></div><div class="ag-load"><span class="n">'+open+'</span><span class="l">open &middot; '+g.total+' total</span></div><div class="ag-bar">'+bar+'</div></div>';
   });
   if(unas>0)h+='<div class="ag-card" style="border-style:dashed"><div class="ag-top"><div class="ag-av">&empty;</div><div class="ag-name">Unassigned</div><span class="ag-status" style="color:var(--tx-m);background:var(--sf)">gap</span></div><div class="ag-load"><span class="n">'+unas+'</span><span class="l">need an owner</span></div></div>';
   var ag=document.getElementById('agent-grid');
@@ -730,7 +854,7 @@ function renderCards(){
     var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">\u{1F4C5} '+it.due_date+'</span>';}
     var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
     var agChip=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
-    var assH=it.assignee?'<span class="agent-chip" title="'+esc(it.assignee)+'"><span class="av">👤</span>'+esc(it.assignee.length>14?it.assignee.substring(0,14)+'…':it.assignee)+'</span>':'';
+    var assH=it.assignee?'<span class="agent-chip" title="'+esc(it.assignee)+'"><span class="av">\u{1F464}</span>'+esc(it.assignee.length>14?it.assignee.substring(0,14)+'…':it.assignee)+'</span>':'';
     var footR='';if(assH)footR+=assH;if(agChip)footR+=agChip;if(!footR)footR='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
     var stMap={backlog:['backlog','BACKLOG'],todo:['todo','TO DO'],in_progress:['in-progress','IN PROGRESS'],on_hold:['on-hold','ON HOLD'],blocked:['blocked','BLOCKED'],review:['review','REVIEW'],escalated:['escalated','ESCALATED'],done:['done','DONE']};var stI=stMap[curCol];var stBadge=stI?'<span class="status-badge '+stI[0]+'">'+stI[1]+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
@@ -742,7 +866,7 @@ function renderCards(){
     h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
     var indH='';
     if(it.subtask_total>0){var stPct=Math.round((it.subtask_done||0)/it.subtask_total*100);indH+='<span class="subtask-ind"><span class="subtask-bar"><span style="width:'+stPct+'%"></span></span>'+(it.subtask_done||0)+'/'+it.subtask_total+'</span>';}
-    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">🔗 '+it.blocked_by.length+'</span>';
+    if(it.blocked_by&&it.blocked_by.length)indH+='<span class="dep-icon">\u{1F517} '+it.blocked_by.length+'</span>';
     if(it.acknowledged===false)indH+='<span class="unack-dot" title="Unacknowledged"></span>';
     if(indH)h+='<div class="card-indicators">'+indH+'</div>';
     h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+'</div><div class="card-foot-right">'+footR+'</div></div></div>';
