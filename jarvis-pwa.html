@@ -180,6 +180,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .card .stripe{position:absolute;left:0;top:0;bottom:0;width:4px;}
 .card-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:5px;}
 .card-proj{font-size:10px;color:var(--tx-d);background:var(--sf);padding:2px 6px;border-radius:4px;border:1px solid var(--card-b);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.card-code{font-size:10px;font-weight:600;color:var(--tx-m);font-family:'SF Mono',monospace;letter-spacing:.3px;}
 .pri-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .pri-critical{background:var(--red);} .pri-high{background:var(--orange);} .pri-medium{background:var(--blue);} .pri-low{background:var(--tx-m);}
 .card-labels{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px;}
@@ -233,7 +234,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .comment-row{display:flex;gap:6px;margin-top:8px;}
 .comment-row input{flex:1;padding:10px;background:var(--bg);border:1px solid var(--card-b);border-radius:8px;color:var(--tx);font-size:14px;outline:none;}
 
-/* Agent panel — full-screen bottom sheet */
+/* Agent panel -- full-screen bottom sheet */
 .agent-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);z-index:500;}
 .agent-overlay.open{display:block;}
 .agent-panel{position:fixed;left:0;right:0;bottom:0;top:48px;background:var(--sf);z-index:501;overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .25s ease;border-radius:16px 16px 0 0;}
@@ -312,10 +313,10 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <body>
 
 <!-- Offline staleness banner (SB-186) -->
-<div id="offline-banner">&#9888; OFFLINE — Viewing cached data as of <span id="offline-ts">—</span></div>
+<div id="offline-banner">&#9888; OFFLINE &#8212; Viewing cached data as of <span id="offline-ts">&#8212;</span></div>
 
 <!-- SW update toast (SB-185) -->
-<div id="sw-update-toast">Update available — tap to refresh</div>
+<div id="sw-update-toast">Update available &#8212; tap to refresh</div>
 
 <!-- Login -->
 <div id="login-overlay">
@@ -439,7 +440,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
   </div>
 </div>
 
-<!-- Agent bottom sheet (fixed overlay — outside .panels scroll context, SB-194) -->
+<!-- Agent bottom sheet (fixed overlay -- outside .panels scroll context, SB-194) -->
 <div class="agent-overlay" id="agent-overlay">
   <div class="agent-panel" id="agent-panel">
     <div class="agent-panel-head"><h3>&#9889; Agents</h3><button class="agent-close" id="agent-close">&times;</button></div>
@@ -521,7 +522,7 @@ function renderJarvis(){
   var now=new Date(),days=['SUN','MON','TUE','WED','THU','FRI','SAT'],months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   document.getElementById('j-date').textContent=days[now.getDay()]+' '+months[now.getMonth()]+' '+String(now.getDate()).padStart(2,'0')+' '+now.getFullYear();
 
-  // Domain chips — dynamic from briefing data (SB-200)
+  // Domain chips -- dynamic from briefing data (SB-200)
   if(briefing && briefing.domain_summaries){
     DL = Object.keys(briefing.domain_summaries).sort();
   } else {
@@ -610,7 +611,7 @@ function renderPulse(){
     if(db)db.addEventListener('click',function(){pulseDismissed=true;gapEl.style.display='none';});
   }else{gapEl.style.display='none';}
 
-  /* DR-1+DR-5: Top-3 priority cards — dedup against recommendations */
+  /* DR-1+DR-5: Top-3 priority cards -- dedup against recommendations */
   var top3=pulse.top_priorities||[];
   var recTexts=(briefing.recommendations||[]).map(function(r){return r.text||'';});
   var t3h='';
@@ -750,7 +751,7 @@ function renderAgents(){
   ag.querySelectorAll('.auto-tgl').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();tglAgentAuto(btn);});});
   fixAgentScroll();
 }
-function fixAgentScroll(){/* no-op — panel uses display toggle, parent .panel scrolls */}
+function fixAgentScroll(){/* no-op -- panel uses display toggle, parent .panel scrolls */}
 async function tglAgentAuto(btn){
   if(offlineGuard())return;
   var id=btn.dataset.agentId,wasOn=btn.dataset.on==='1',next=!wasOn;
@@ -779,6 +780,7 @@ function renderCards(){
     var cmtH=it.comment_count>0?'<span>\u{1F4AC} '+it.comment_count+'</span>':'';
     var agH=it.agent_name?'<span class="agent-chip"><span class="av">'+esc(it.agent_icon||'')+'</span>'+esc((it.agent_name||'').replace(/ (Developer|Engineer)$/,''))+'</span>':'';
     h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta"><span class="pri-dot pri-'+esc(it.priority)+'"></span>';
+    if(it.ticket_code)h+='<span class="card-code">'+esc(it.ticket_code)+'</span>';
     if(!singleP)h+='<span class="card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span>';
     h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
     h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+'</div>'+agH+'</div></div>';
@@ -821,7 +823,7 @@ document.getElementById('stats-toggle').addEventListener('click',function(){
   document.getElementById('stats-arrow').innerHTML=open?'&#9650;':'&#9660;';
 });
 
-/* Agent panel toggle — bottom sheet overlay (SB-194) */
+/* Agent panel toggle -- bottom sheet overlay (SB-194) */
 function closeAgentPanel(){document.getElementById('agent-overlay').classList.remove('open');document.getElementById('btn-agents').classList.remove('active');}
 document.getElementById('btn-agents').addEventListener('click',function(){
   var o=document.getElementById('agent-overlay');
@@ -1030,7 +1032,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// User taps the update toast → tell the waiting SW to activate
+// User taps the update toast -> tell the waiting SW to activate
 document.getElementById('sw-update-toast').addEventListener('click', function() {
   if (swUpdateWaiting) {
     swUpdateWaiting.postMessage({ type: 'SKIP_WAITING' });
