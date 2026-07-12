@@ -200,7 +200,7 @@ Deno.serve(async (req: Request) => {
         .eq("status", "todo")
         .not("assigned_agent_id", "is", null)
         .order("sort_order", { ascending: true })
-        .limit(maxDispatch * 5);
+        .limit(200); // fetch a wide window; the guard + authority filters below select the real candidates
       const fresh = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id));
       // authority_level >= 2 needs Jason — report it but do NOT let it consume a dispatch slot
       for (const it of fresh.filter((it: any) => (it.authority_level ?? 0) >= 2)) {
