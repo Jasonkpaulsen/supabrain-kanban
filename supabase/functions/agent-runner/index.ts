@@ -195,21 +195,22 @@ Deno.serve(async (req: Request) => {
       const { data: priorRuns } = await sb.from("agent_runs").select("work_item_id").not("work_item_id", "is", null);
       const alreadyDispatched = new Set((priorRuns ?? []).map((r: any) => r.work_item_id));
       const { data: readyRaw } = await sb.from("work_items")
-        .select("id,project_id,title,description,type,status,assigned_agent_id,authority_level,sort_order")
+        .select("id,project_id,ticket_code,title,description,type,status,assigned_agent_id,authority_level,sort_order")
         .in("project_id", scopeIds.length ? scopeIds : ["00000000-0000-0000-0000-000000000000"])
         .eq("status", "todo")
         .not("assigned_agent_id", "is", null)
         .order("sort_order", { ascending: true })
         .limit(maxDispatch * 5);
-      const ready = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id)).slice(0, maxDispatch);
+      const fresh = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id));
+      // authority_level >= 2 needs Jason — report it but do NOT let it consume a dispatch slot
+      for (const it of fresh.filter((it: any) => (it.authority_level ?? 0) >= 2)) {
+        skipped.push({ id: it.id, title: it.title, reason: `authority L${it.authority_level} — requires Jason, not auto-dispatched` });
+      }
+      const ready = fresh.filter((it: any) => (it.authority_level ?? 0) < 2).slice(0, maxDispatch);
 
       for (const it of (ready ?? []) as any[]) {
         const ag = agents.find((a) => a.id === it.assigned_agent_id);
         if (!ag) continue;
-        if ((it.authority_level ?? 0) >= 2) {
-          skipped.push({ id: it.id, title: it.title, reason: `authority L${it.authority_level} — requires Jason, not auto-dispatched` });
-          continue;
-        }
         if (dryRun) { dispatched.push({ id: it.id, agent: ag.name, mode: "dry" }); continue; }
 
         const startedAt = Date.now();
@@ -225,14 +226,14 @@ Deno.serve(async (req: Request) => {
             ag.constraints?.length ? `\n\nConstraints:\n- ${ag.constraints.join("\n- ")}` : "",
             "\n\nYou are running unattended via the agent runner. Produce a concise, actionable plan for the ticket below: the approach, the concrete steps, acceptance criteria you will satisfy, and any blockers/escalations. Do NOT claim work is done. If this needs a decision above your authority, say so and name who to escalate to.",
           ].join("");
-          const userMsg = `Ticket: ${it.title}\nType: ${it.type}\n\n${it.description ?? "(no description)"}`;
+          const userMsg = `Ticket ${it.ticket_code}: ${it.title}\nType: ${it.type}\n\n${it.description ?? "(no description)"}`;
 
           const resp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
               model: ag.model || "claude-sonnet-5",
-              max_tokens: 1024,
+              max_tokens: 4096,
               system: sys,
               messages: [{ role: "user", content: userMsg }],
             }),
