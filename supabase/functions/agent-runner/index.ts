@@ -4,11 +4,14 @@
 // Phases:
 //   assign   (deterministic, safe)  — match unassigned/ready tickets to agents via auto_assign_rules
 //   sweep    (deterministic, safe)  — idle-agent / WIP-overload / assignment+design drift detection
-//   dispatch (LLM, OFF by default)  — invoke the assigned agent's model to produce a plan comment
+//   dispatch (LLM, opt-in per call) — invoke the assigned agent's model to produce a plan comment
 //
 // Auth: custom x-token header (mirrors lce-cleanup). Invoked by pg_cron via net.http_post.
-// Governance: dispatch is gated behind ENABLE_DISPATCH=true AND ANTHROPIC_API_KEY, never auto-acts
-// on tickets with authority_level >= 2 (recommend/approval/executive — those need Jason).
+// Governance: dispatch runs ONLY when the caller explicitly requests phase "dispatch" (cron body)
+// AND an ANTHROPIC_API_KEY secret is present; it never auto-acts on tickets with authority_level >= 2
+// (recommend/approval/executive — those need Jason). The assign/sweep crons never include "dispatch".
+// Dispatch is scopeable via body.dispatchProjects (list of project ids) and guarded once-per-ticket
+// (a work item with a completed run is never re-dispatched). Candidates ordered by sort_order.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -52,7 +55,9 @@ Deno.serve(async (req: Request) => {
   const phases: string[] = Array.isArray(body.phases) && body.phases.length
     ? (body.phases as string[])
     : ["assign", "sweep"];
-  const dispatchEnabled = Deno.env.get("ENABLE_DISPATCH") === "true" && phases.includes("dispatch");
+  // Dispatch is opt-in per invocation: the caller must explicitly include phase "dispatch"
+  // (only a dedicated dispatch cron does) AND an ANTHROPIC_API_KEY must be present.
+  const dispatchEnabled = phases.includes("dispatch");
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -175,19 +180,28 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ============ PHASE C: DISPATCH (LLM — OFF by default) ============
+  // ============ PHASE C: DISPATCH (LLM — opt-in via phase "dispatch" + ANTHROPIC_API_KEY) ============
   if (dispatchEnabled) {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {
-      (out as any).dispatch_note = "ENABLE_DISPATCH=true but ANTHROPIC_API_KEY is not set — dispatch skipped";
+      (out as any).dispatch_note = "phase 'dispatch' requested but ANTHROPIC_API_KEY is not set — dispatch skipped";
     } else {
       const maxDispatch = typeof body.maxDispatch === "number" ? (body.maxDispatch as number) : 3;
-      const { data: ready } = await sb.from("work_items")
-        .select("id,project_id,title,description,type,status,assigned_agent_id,authority_level")
-        .in("project_id", projIds)
+      // Optional project scoping (e.g. CIP-only dispatch) — intersect with automated projects.
+      const reqScope = Array.isArray(body.dispatchProjects) ? (body.dispatchProjects as string[]) : null;
+      const scopeIds = reqScope ? projIds.filter((id) => reqScope.includes(id)) : projIds;
+      // Once-per-ticket guard: never re-dispatch a ticket that already has ANY run
+      // (running/completed/failed). Keying on "any run" is robust to telemetry hiccups.
+      const { data: priorRuns } = await sb.from("agent_runs").select("work_item_id").not("work_item_id", "is", null);
+      const alreadyDispatched = new Set((priorRuns ?? []).map((r: any) => r.work_item_id));
+      const { data: readyRaw } = await sb.from("work_items")
+        .select("id,project_id,title,description,type,status,assigned_agent_id,authority_level,sort_order")
+        .in("project_id", scopeIds.length ? scopeIds : ["00000000-0000-0000-0000-000000000000"])
         .eq("status", "todo")
         .not("assigned_agent_id", "is", null)
-        .limit(maxDispatch);
+        .order("sort_order", { ascending: true })
+        .limit(maxDispatch * 5);
+      const ready = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id)).slice(0, maxDispatch);
 
       for (const it of (ready ?? []) as any[]) {
         const ag = agents.find((a) => a.id === it.assigned_agent_id);
@@ -199,13 +213,11 @@ Deno.serve(async (req: Request) => {
         if (dryRun) { dispatched.push({ id: it.id, agent: ag.name, mode: "dry" }); continue; }
 
         const startedAt = Date.now();
-        let runId: string | null = null;
         try {
-          const { data: run } = await sb.from("agent_runs").insert({
+          await sb.from("agent_runs").insert({
             user_id: ag.user_id, agent_id: ag.id, work_item_id: it.id, project_id: it.project_id,
             started_at: new Date(startedAt).toISOString(), status: "running", trigger_type: "scheduled",
-          }).select("id").single();
-          runId = (run as any)?.id ?? null;
+          });
 
           const sys = [
             ag.system_prompt ?? "",
@@ -219,7 +231,7 @@ Deno.serve(async (req: Request) => {
             method: "POST",
             headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
-              model: ag.model || "claude-sonnet-4-6",
+              model: ag.model || "claude-sonnet-5",
               max_tokens: 1024,
               system: sys,
               messages: [{ role: "user", content: userMsg }],
@@ -232,25 +244,21 @@ Deno.serve(async (req: Request) => {
           await sb.from("work_item_comments").insert({
             work_item_id: it.id, user_id: ag.user_id, body: `**${ag.name}** (auto-run plan):\n\n${text}`,
           });
-          if (runId) {
-            await sb.from("agent_runs").update({
-              finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt, status: "completed",
-              tokens_input: usage.input_tokens ?? null, tokens_output: usage.output_tokens ?? null,
-              tokens_total: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0), api_calls: 1,
-              result_summary: `Posted plan for "${it.title}"`,
-            }).eq("id", runId);
-          }
+          // NB: duration_ms and tokens_total are GENERATED columns — never write them.
+          await sb.from("agent_runs").update({
+            finished_at: new Date().toISOString(), status: "completed",
+            tokens_input: usage.input_tokens ?? null, tokens_output: usage.output_tokens ?? null,
+            api_calls: 1, result_summary: `Posted plan for "${it.title}"`,
+          }).eq("work_item_id", it.id).eq("status", "running");
           await sb.from("agents").update({
             last_run_at: new Date().toISOString(), run_count: (ag.run_count ?? 0) + 1,
           }).eq("id", ag.id);
           dispatched.push({ id: it.id, agent: ag.name, mode: "live", chars: text.length });
         } catch (e) {
-          if (runId) {
-            await sb.from("agent_runs").update({
-              finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt,
-              status: "failed", error_message: String(e),
-            }).eq("id", runId);
-          }
+          await sb.from("agent_runs").update({
+            finished_at: new Date().toISOString(),
+            status: "failed", error_message: String(e),
+          }).eq("work_item_id", it.id).eq("status", "running");
           dispatched.push({ id: it.id, agent: ag.name, mode: "error", error: String(e) });
         }
       }
