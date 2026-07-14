@@ -190,6 +190,8 @@ Deno.serve(async (req: Request) => {
       // Optional project scoping (e.g. CIP-only dispatch) — intersect with automated projects.
       const reqScope = Array.isArray(body.dispatchProjects) ? (body.dispatchProjects as string[]) : null;
       const scopeIds = reqScope ? projIds.filter((id) => reqScope.includes(id)) : projIds;
+      // forceItems (ticket_codes) bypass the once-per-ticket guard — used to re-kick a ticket after a blocker clears.
+      const forceCodes = Array.isArray(body.forceItems) ? (body.forceItems as string[]) : [];
       // Once-per-ticket guard: never re-dispatch a ticket that already has ANY run
       // (running/completed/failed). Keying on "any run" is robust to telemetry hiccups.
       const { data: priorRuns } = await sb.from("agent_runs").select("work_item_id").not("work_item_id", "is", null);
@@ -201,12 +203,22 @@ Deno.serve(async (req: Request) => {
         .not("assigned_agent_id", "is", null)
         .order("sort_order", { ascending: true })
         .limit(200); // fetch a wide window; the guard + authority filters below select the real candidates
-      const fresh = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id));
+      // forced re-kicks: fetch by ticket_code in scope, any status, exempt from the once-per-ticket guard
+      let forced: any[] = [];
+      if (forceCodes.length) {
+        const { data: forcedRaw } = await sb.from("work_items")
+          .select("id,project_id,ticket_code,title,description,type,status,assigned_agent_id,authority_level,sort_order")
+          .in("ticket_code", forceCodes)
+          .in("project_id", scopeIds.length ? scopeIds : ["00000000-0000-0000-0000-000000000000"]);
+        forced = (forcedRaw ?? []).filter((it: any) => (it.authority_level ?? 0) < 2 && it.assigned_agent_id);
+      }
+      const forcedIds = new Set(forced.map((f: any) => f.id));
+      const fresh = (readyRaw ?? []).filter((it: any) => !alreadyDispatched.has(it.id) && !forcedIds.has(it.id));
       // authority_level >= 2 needs Jason — report it but do NOT let it consume a dispatch slot
       for (const it of fresh.filter((it: any) => (it.authority_level ?? 0) >= 2)) {
         skipped.push({ id: it.id, title: it.title, reason: `authority L${it.authority_level} — requires Jason, not auto-dispatched` });
       }
-      const ready = fresh.filter((it: any) => (it.authority_level ?? 0) < 2).slice(0, maxDispatch);
+      const ready = [...forced, ...fresh.filter((it: any) => (it.authority_level ?? 0) < 2)].slice(0, maxDispatch);
 
       for (const it of (ready ?? []) as any[]) {
         const ag = agents.find((a) => a.id === it.assigned_agent_id);
