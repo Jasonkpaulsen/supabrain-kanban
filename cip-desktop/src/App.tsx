@@ -1,21 +1,56 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState } from "react";
 import { NAV } from "./nav";
+import CampaignGate from "./views/CampaignGate";
+import Dashboard from "./views/Dashboard";
+import RecordSession from "./views/RecordSession";
+import Sessions from "./views/Sessions";
+import Placeholder from "./views/Placeholder";
 
-type AudioDevice = { id: string; name: string; is_default: boolean };
-type CaptureBackends = { system_audio: string; microphone: string };
+const CAMPAIGN_KEY = "cip.campaign";
+type Campaign = { id: string; name: string };
+
+function loadCampaign(): Campaign | null {
+  try {
+    const raw = localStorage.getItem(CAMPAIGN_KEY);
+    return raw ? (JSON.parse(raw) as Campaign) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function App() {
+  const [campaign, setCampaign] = useState<Campaign | null>(loadCampaign);
   const [active, setActive] = useState("dashboard");
-  const [mics, setMics] = useState<AudioDevice[]>([]);
-  const [backends, setBackends] = useState<CaptureBackends | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  // Bump to force session-backed views to re-read the vault after a save.
+  const [rev, setRev] = useState(0);
 
-  useEffect(() => {
-    // Probe the platform-abstraction layer (CIP-094) so the shell reflects real capabilities.
-    invoke<CaptureBackends>("capture_backends").then(setBackends).catch((e) => setErr(String(e)));
-    invoke<AudioDevice[]>("list_input_devices").then(setMics).catch(() => setMics([]));
-  }, []);
+  if (!campaign) {
+    return (
+      <CampaignGate
+        onReady={(id, name) => {
+          const c = { id, name };
+          localStorage.setItem(CAMPAIGN_KEY, JSON.stringify(c));
+          setCampaign(c);
+        }}
+      />
+    );
+  }
+
+  const label = NAV.flatMap((g) => g.items).find((it) => it.id === active)?.label ?? "";
+
+  function body() {
+    if (!campaign) return null;
+    switch (active) {
+      case "dashboard":
+        return <Dashboard key={rev} campaignId={campaign.id} campaignName={campaign.name} onRecord={() => setActive("record")} />;
+      case "record":
+        return <RecordSession campaignId={campaign.id} onSaved={() => { setRev((r) => r + 1); setActive("list"); }} />;
+      case "list":
+        return <Sessions key={rev} campaignId={campaign.id} onRecord={() => setActive("record")} />;
+      default:
+        return <Placeholder title={label} />;
+    }
+  }
 
   return (
     <div className="app">
@@ -31,43 +66,15 @@ export default function App() {
                 onClick={() => setActive(it.id)}
               >
                 {it.label}
-                {it.badge ? <span className="badge">0</span> : null}
               </button>
             ))}
           </div>
         ))}
+        <button className="nav-switch" onClick={() => { localStorage.removeItem(CAMPAIGN_KEY); setCampaign(null); }}>
+          Switch campaign
+        </button>
       </nav>
-
-      <main className="content">
-        <h1>Campaign Intelligence Platform</h1>
-        <p className="muted">Local-first · one vault per campaign · offline-first.</p>
-
-        <section className="card">
-          <h2>Capture backends (platform layer)</h2>
-          {err && <p className="error">{err}</p>}
-          {backends ? (
-            <ul>
-              <li>System audio: <code>{backends.system_audio}</code></li>
-              <li>Microphone: <code>{backends.microphone}</code></li>
-            </ul>
-          ) : (
-            <p className="muted">probing…</p>
-          )}
-          <p className="muted">
-            System-wide capture (any application) + mic — per ADR-CIP. OS backends are stubbed
-            until CIP-150 lands the native implementations.
-          </p>
-        </section>
-
-        <section className="card">
-          <h2>Input devices</h2>
-          {mics.length ? (
-            <ul>{mics.map((m) => <li key={m.id}>{m.name}{m.is_default ? " (default)" : ""}</li>)}</ul>
-          ) : (
-            <p className="muted">No input devices reported by the platform layer.</p>
-          )}
-        </section>
-      </main>
+      <main className="content">{body()}</main>
     </div>
   );
 }

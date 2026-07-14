@@ -22,6 +22,8 @@ pub fn run() {
             commands::create_campaign,
             commands::next_session_number,
             commands::create_session,
+            commands::list_sessions,
+            commands::live_capture_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the CIP desktop app");

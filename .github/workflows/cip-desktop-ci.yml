@@ -40,3 +40,27 @@ jobs:
       - run: npm install
       - name: Type-check + build
         run: npm run build
+
+  dmg:
+    name: macOS bundle (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cip-desktop/src-tauri
+      - run: npm install
+      - name: Build DMG (unsigned)
+        run: npm run tauri build -- --bundles dmg
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cip-desktop-dmg
+          path: cip-desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

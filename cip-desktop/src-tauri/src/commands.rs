@@ -1,6 +1,7 @@
 //! Tauri commands — the IPC surface the React UI calls.
 
 use crate::platform::audio::{AudioDevice, CaptureBackends, CaptureSource};
+use crate::vault::Session;
 use crate::AppState;
 use tauri::State;
 
@@ -64,4 +65,26 @@ pub fn create_session(
         .create_session(session_number, title.as_deref(), &source, &recorded_at)
         .map_err(err)?;
     Ok(s.id)
+}
+
+/// List a campaign's sessions, ordered for cataloguing (CIP-149).
+#[tauri::command]
+pub fn list_sessions(state: State<AppState>, campaign_id: String) -> Result<Vec<Session>, String> {
+    let db = state.platform.fs().vault_db_path(&campaign_id);
+    crate::vault::Vault::open(&db).map_err(err)?.list_sessions().map_err(err)
+}
+
+/// Whether native live (system-audio) capture is available on this host yet (CIP-150).
+#[tauri::command]
+pub fn live_capture_available(state: State<AppState>) -> bool {
+    // Native backends are stubbed; probe by attempting a no-op start config.
+    state
+        .platform
+        .audio()
+        .start_live(crate::platform::audio::LiveCaptureConfig {
+            mic_device_id: None,
+            capture_system_audio: true,
+            output_path: String::new(),
+        })
+        .is_ok()
 }
