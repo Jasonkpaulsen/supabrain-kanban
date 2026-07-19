@@ -3,7 +3,8 @@
 // SB-185: Safe update flow (skipWaiting only on user acceptance)
 // SB-186: Background-sync queue removed, cache purge on logout
 // SB-199/200: Domain-aware narrative swap in dashboards
-const CACHE_NAME = 'jarvis-pwa-v6';
+// SB-275: Status-driven reversible approval (awaiting_jason column + un-approve)
+const CACHE_NAME = 'jarvis-pwa-v7';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
