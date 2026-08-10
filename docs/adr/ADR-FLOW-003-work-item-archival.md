@@ -5,13 +5,20 @@
 - **Downstream build ticket:** SB-314 (BUILD)
 - **Domain:** infrastructure
 - **Supersedes / relates to:** ADR-FLOW-001 (WIP limits), ADR-FLOW-002 (review + approval gates on `done`), ADR-COMP-001 (governance audit trail)
-- **Revision:** rev 2 (2026-08-10) — revised after System Architect and Process Engineer review of
-  rev 1. Ten defects fixed: the view-vs-client filter contradiction (§4.1), a third unscoped
-  frontend (§4.1), the re-open trap that stranded rows permanently (§4.4), the missing run identity
-  that made rollback impossible (§4.5), an incorrect L2 "standing approval" claim (§5), a schedule
-  collision (§5), the unviable null-`completed_at` deferral (§4.2), an unnecessary index (§4.2), an
-  epic-exclusion spec conflict (§5), and the false claim that operational views are unaffected
-  (§4.1). Retention changed from a flat 30 days to a 14/60-day two-tier policy per Jason.
+- **Revision:** rev 3 (2026-08-10) — retention returns to a **flat 14 days**. Rev 2's 14/60 two-tier
+  policy was built on a false premise: that the 637 unreviewed `done` tickets were *live* gate leaks
+  needing a brake. They are not. The review gate has held since it shipped, and those 637 rows are
+  settled history plus by-design exemptions (§1). With no live leak to protect, the 60-day tier
+  protected nothing and cost 316 rows of board clutter. All rev 2 counts were also re-measured on one
+  consistent basis; rev 2 quoted two different 30-day figures (514 in §1, 496 in §5) and neither is
+  what a clean measurement returns.
+- **Revision history:** rev 2 (2026-08-10) — revised after System Architect and Process Engineer
+  review of rev 1. Ten defects fixed: the view-vs-client filter contradiction (§4.1), a third
+  unscoped frontend (§4.1), the re-open trap that stranded rows permanently (§4.4), the missing run
+  identity that made rollback impossible (§4.5), an incorrect L2 "standing approval" claim (§5), a
+  schedule collision (§5), the unviable null-`completed_at` deferral (§4.2), an unnecessary index
+  (§4.2), an epic-exclusion spec conflict (§5), and the false claim that operational views are
+  unaffected (§4.1).
 
 ---
 
@@ -52,31 +59,59 @@ Two statements in the ticket description are out of date and the design should n
 | `done` and `completed_at` > 30d | 514 |
 | `done` and `updated_at` > 30d | 227 |
 
-Two numbers drive the whole design.
-
 **514 vs 227.** `updated_at` is churned by unrelated edits and by trigger writes, so it is **not** a
 valid age signal. See §4.2.
 
-**637 of 717 `done` tickets never entered review.** Every one of them is an open
-`missing_review` leak in `v_gate_leak_alerts`. This is review debt on *already-shipped* work — it is
-not backlog, and archival does not resolve it, only hides it. §5 makes that trade-off explicit
-rather than silent.
+### The 637 unreviewed rows are not a live leak — corrected in rev 3
+
+Rev 1 and rev 2 both stated that 637 `done` tickets "bypassed review" and are open `missing_review`
+gate leaks, and rev 2 built a 60-day retention tier around protecting them. **That premise is
+false**, and the correction is load-bearing enough to state at length.
+
+`enforce_done_gate` is a `BEFORE INSERT OR UPDATE` trigger on `work_items` — so it intercepts direct
+PostgREST PATCHes, not merely calls through `move_work_item`. It raises when a non-exempt ticket
+enters `done` with `review_entered_at IS NULL`. It shipped in migration `sb234_enforce_done_gates`,
+version `20260714235717` — **2026-07-14 23:57 UTC**.
+
+Decomposing the 637 (measured 2026-08-10):
+
+| Why the ticket reached `done` unreviewed | Rows |
+|---|---:|
+| `created_at` precedes the trigger's internal `grandfather_date` of 2026-06-17 — skipped by design | 458 |
+| Exempt `type` (`epic`, `chore`, `spike`, `requirement`) — skipped by design | 93 |
+| Explicit `meta.review_gate_exempt = true` — deliberate opt-out | 15 |
+| Completed **before the gate existed** | 71 |
+| **Unexplained — i.e. an actual bypass** | **0** |
+
+The most recent row in that fourth bucket has `completed_at` = **2026-07-13 22:02**, twenty-six hours
+before the gate shipped. Since it shipped, **41 non-exempt tickets have reached `done` and all 41
+carry `review_entered_at`.**
+
+So nothing is currently leaking. What the 637 represent is settled history plus three deliberate
+exemptions. The real defect is that `v_gate_leak_alerts` reports them as active — an alarm with a
+permanent non-zero floor, which trains its readers to ignore it. **That is now ADR-FLOW-004's
+subject, not this ADR's** (§6).
+
+The consequence here: `review_entered_at` is **not** a retention signal. It separates history from
+policy, not urgent from safe. Rev 3 therefore drops the two-tier scheme entirely.
 
 ### Candidate set under the adopted policy (measured 2026-08-10)
 
-| Tier | Rule | Rows |
+Distribution over `status = 'done' AND completed_at IS NOT NULL`, one consistent basis:
+
+| Age | 7d | 14d | 30d | 45d | 60d | 90d |
+|---|---:|---:|---:|---:|---:|---:|
+| Rows | 637 | **587** | 514 | 499 | 255 | 18 |
+
+| | Rule | Rows |
 |---|---|---|
-| Reviewed | `review_entered_at IS NOT NULL`, `completed_at` > **14d** | **27** |
-| Never reviewed | `review_entered_at IS NULL`, `completed_at` > **60d** | **239** |
-| **First-sweep total** | | **266** |
-| *Held back* | never reviewed, `completed_at` ≤ 60d — stay visible | *343* |
-| *Excluded* | `completed_at IS NULL` | *62* |
+| **First-sweep total** | `completed_at` > **14d**, minus exclusions | **582** |
+| *Stays visible* | `completed_at` ≤ 14d | *68* |
+| *Excluded* | `completed_at IS NULL` (until backfilled, §4.2) | *62* |
 | *Excluded* | has a non-`done` child | *5* |
 
-The 27-row reviewed tier is near-noise; in practice this policy is **a 60-day window on unreviewed
-work**. Steady state leaves ~839 rows visible, not the ~600 a flat 14-day window would imply,
-because new `done` tickets keep landing unreviewed and sit for 60 days. Accepted knowingly: the
-board is not the place to fix a review-gate leak.
+Steady state leaves **135** `done` rows on the board alongside the 388 live ones — 523 of today's
+1,105. Rev 2's two-tier policy would have left 839.
 
 ---
 
@@ -203,8 +238,10 @@ historical one. `jarvis_ops_metrics` is explicitly *not* to be filtered.
 
 A correction to the first draft: it claimed operational views "filter on non-`done` states" and are
 therefore unaffected. That is **false**. `v_gate_leak_alerts` is `WHERE status = 'done'`, and every
-archival candidate appears in it. The view will keep reporting rows the board can no longer show —
-intended, and the reason §5 caps how much unreviewed work may be hidden.
+archival candidate appears in it. The view will keep reporting rows the board can no longer show.
+That is intended — archival must not silence an alert — but note that the view's `missing_review`
+count is itself misleading today for reasons unrelated to archival (§1), which ADR-FLOW-004 addresses
+separately. Archiving neither creates nor worsens that problem: the count is unchanged by this ADR.
 
 ### 4.2 Age is measured from `completed_at`, never `updated_at`
 
@@ -270,7 +307,8 @@ Re-opening a ticket un-archives it. Invariant: **`archived = true` implies `stat
 touched. Today you cannot: `activity_log` has no run identifier (`target_id` holds a single uuid),
 and `set_work_item_archived` writes the same `archived_at` field as the sweep, making manual and
 swept rows indistinguishable after the fact. `activity_log` also holds **326 rows lifetime** — a
-per-row dump of a 266-row candidate set would be ~80% of the table's entire history in one run.
+per-row dump of the 582-row candidate set would write nearly **twice the table's entire history** in
+a single run. The argument for one summary row per run only got stronger under rev 3's flat window.
 
 Required:
 
@@ -288,8 +326,8 @@ Manual archives carry no `archive_run_id`, so a rollback can never catch them.
 
 | Question | Decision |
 |---|---|
-| **Retention window** | **Two tiers.** Reviewed work (`review_entered_at IS NOT NULL`): **14 days**. Never-reviewed work (`review_entered_at IS NULL`): **60 days**. Not a flat 30 — see below. |
-| **Archivable** | Any `done` work item meeting its tier's window and not excluded below. |
+| **Retention window** | **Flat 14 days from `completed_at`.** No tiering on `review_entered_at` — see below. Not 30 — see below. |
+| **Archivable** | Any `done` work item older than the window and not excluded below. |
 | **Excluded** | (1) `completed_at IS NULL` until backfilled per §4.2 — 62 today; (2) any row with a non-`done` child — **5 today**. There is **no categorical epic exclusion**: an epic whose children are all `done` is archivable, and the non-`done`-child rule already protects live epics. (The first draft carried both rules inconsistently — ADR text excluded only epics with live children while SB-314 excluded all epics, a 14-row spec conflict. Resolved in favour of the child rule.) No blocker exclusion is needed either: `blocked_by_count` counts a link only when `blocker.status <> 'done'`, so a `done` candidate is by construction not blocking anything. |
 | **Trigger** | **Scheduled sweep**, daily, via `pg_cron`. Run at **07:40 UTC**. *Not* 07:30 — `agent-runner-dispatch-cip` is `30 * * * *`, so 07:30 is precisely the collision the first draft claimed to avoid. Manual archive/un-archive stays available from the board. |
 | **Authority** | **Split, because L2 does not mean what the first draft assumed.** `authority_levels` row 2 (`recommend`) is `stop_required = true` — "Stop and present decision package… Status `awaiting_jason` until decided." L2 is stop-and-ask *every run*, the opposite of an unattended sweep, and "standing approval" appears nowhere in the governance data. Therefore: **this ADR** is L2 (`process_change` + `new_automation`, both `default_level 2`) and requires Jason's sign-off once. **Each sweep run** is **L0 `routine_maintenance`** ("Pre-authorized recurring upkeep"), which is what actually permits unattended execution. The grant must be recorded on `authority_action_map` the way `pm_coverage_rebalance` records its own ("Approved by Jason 2026-08-02 (GOV-PROP-1, ADR-GOV-002)"). Un-archiving stays L1. |
@@ -298,26 +336,30 @@ Manual archives carry no `archive_run_id`, so a rollback can never catch them.
 | **First run** | **Dry-run first**: write the candidate set to `activity_log`, review the count, then enable. |
 | **Anomaly guard** | The sweep **aborts and logs** rather than archiving if the candidate count exceeds 2× the trailing median run (or >50 rows in steady state). Non-negotiable given the environment: `cron.job_run_details` shows **3,831 of 16,656 runs failed (23%)**, and `watch-cip165-dispatch166` has been failing **37%** of its runs unnoticed. A sweep that fails silently is the default outcome here, not the exception. |
 
-### Why two tiers, and why 14 rather than 30
+### Why 14, and why flat
 
-Measured distribution (`completed_at`, 2026-08-10): 7d → 614, 14d → 566, **30d → 496**, 45d → 481,
-60d → 235, 90d → 6.
+Measured distribution (§1): 7d → 637, 14d → **587**, 30d → 514, 45d → 499, 60d → 255, 90d → 18.
 
 30 vs 45 differs by 15 rows — a distinction without a difference. The real fork is ≤14 vs ≥30, and
-at 30 days most project boards still show more `done` cards than live ones. Days 15–30 hold only 70
+at 30 days most project boards still show more `done` cards than live ones. Days 15–30 hold only 73
 cards. **14 days** covers a two-week retro and is the better default.
 
-The 60-day tier for never-reviewed work is the deliberate brake. Those 637 rows are open
-`missing_review` gate leaks (§1); archiving them on the same 14-day clock would hide 78% of that
-backlog within a fortnight. Holding them 60 days keeps recent leaks on the board where they can be
-worked, while letting genuinely dead debt clear. **This is a containment measure, not a fix** — the
-real remedy is closing whatever lets 637 tickets reach `done` without review, which is out of scope
-here and should get its own ticket.
+**Why not the 14/60 tiering rev 2 adopted.** That scheme existed to keep unreviewed work visible on
+the theory that each such row was a live gate leak someone still had to act on. §1 shows the review
+gate has held since 2026-07-14 and the 637 rows are historical debt plus by-design exemptions. A
+brake protecting nothing is not free: it would have held **316** additional rows on the board
+indefinitely — and permanently, since the 458 grandfathered rows can never acquire a
+`review_entered_at`. The tier was also self-perpetuating in a way that never converged: the exempt
+types (`epic`, `chore`, `spike`, `requirement`) are *designed* never to enter review, so every new
+chore would have sat for 60 days forever.
 
-Retention is a policy constant, not a hardcoded literal: store `archive_after_days` and
-`archive_after_days_unreviewed` **per project**, with a global default. The first draft put a single
-value on the SB project row, but SB is only 194 of 496 candidates (39%) — one project's setting must
-not govern the other 18.
+Whether those exemptions should still exist is a live policy question — but it belongs to
+ADR-FLOW-004, and it is not a question the archival window should answer by proxy.
+
+Retention is a policy constant, not a hardcoded literal: store `archive_after_days` **per project**,
+with a global default. The first draft put a single value on the SB project row, but the 582
+candidates span **11 projects** and SB accounts for only 208 of them (**36%**) — one project's
+setting must not govern the other ten.
 
 ---
 
@@ -329,8 +371,11 @@ not govern the other 18.
   mechanism.
 - No change to any CHECK constraint or status vocabulary. One **new** trigger is added (§4.4); no
   existing gate trigger is modified.
-- **Fixing the review-gate leak itself.** 637 `done` tickets bypassed review; this ADR contains the
-  board-level symptom and deliberately does not address the cause. That needs its own ticket.
+- **`v_gate_leak_alerts` scoping.** The view reports 637 `missing_review` rows that are settled
+  history and by-design exemptions rather than live leaks (§1). Rev 1 and rev 2 mis-described this as
+  an open bypass and tried to compensate for it in the retention window. Rev 3 removes that
+  compensation and hands the actual defect to **ADR-FLOW-004 — gate-leak alert scoping**, commissioned
+  2026-08-10. Nothing in this ADR changes the view or the counts it reports.
 - `pt1_dashboard_anon_read` grants anon SELECT on all `work_items` for project
   `ef6fdb53-…`, and `kanban_board_view` is `security_invoker = true`. Any external consumer reading
   through that policy is an unenumerated read path, out of scope here but worth knowing about.
@@ -348,9 +393,10 @@ Engineer, blocked on sign-off of this ADR. Scope:
 2. Add the `BEFORE UPDATE` trigger from §4.4 enforcing `archived ⇒ status = 'done'`.
 3. Recreate `kanban_board_view` projecting `archived`, `archived_at`, **with no WHERE clause**
    (§4.1). Leave `jarvis_ops_metrics` and all audit views unfiltered.
-4. `archive_work_items(p_dry_run boolean DEFAULT true, p_days int DEFAULT 14, p_days_unreviewed int DEFAULT 60)`
-   — SECURITY DEFINER, two-tier predicate + §5 exclusions, per-project overrides, `run_id` stamping
-   and single summary `activity_log` row (§4.5), anomaly abort (§5), idempotent (§4.3).
+4. `archive_work_items(p_dry_run boolean DEFAULT true, p_days int DEFAULT 14)` — SECURITY DEFINER,
+   single-window predicate + §5 exclusions, per-project `archive_after_days` override, `run_id`
+   stamping and single summary `activity_log` row (§4.5), anomaly abort (§5), idempotent (§4.3).
+   The predicate must not reference `review_entered_at` (§5).
 5. `set_work_item_archived(p_item_id uuid, p_archived boolean)` RPC for manual archive/restore.
 6. `pg_cron` job `work-item-archive-sweep` at `40 7 * * *`, created **disabled**; enabled only after
    the dry-run is reviewed. Add a health check over `cron.job_run_details` for this job.
@@ -365,7 +411,11 @@ Engineer, blocked on sign-off of this ADR. Scope:
 **Acceptance criteria** — each must be checkable, and none may reference a stale count:
 
 - [ ] Dry-run count equals a freshly-computed count of the §5 predicate at run time. Do **not**
-      hardcode a target number: 266 is a 2026-08-10 measurement, not an invariant.
+      hardcode a target number: 582 is a 2026-08-10 measurement, not an invariant.
+- [ ] The first live run is large by construction (~582 rows, five months of backlog) and **will**
+      trip the §5 anomaly guard, which has no trailing median to compare against. Approve that first
+      run explicitly rather than widening the guard to accommodate it; the guard governs steady
+      state, where a daily run should archive single digits.
 - [ ] Dry-run returns **zero** rows with a non-`done` child and zero with `completed_at IS NULL`.
 - [ ] Two consecutive live runs: the second archives 0 rows.
 - [ ] Snapshot `blocked_by_count` per live ticket before and after — unchanged.
