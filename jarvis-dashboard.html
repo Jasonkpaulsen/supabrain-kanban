@@ -457,7 +457,7 @@ async function loadAll(){
     var [pRes,lRes,iRes,aRes,bRes,jRes] = await Promise.all([
       fetch(SUPABASE_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
-      fetch(SUPABASE_URL+'/rest/v1/kanban_board_view?select=*&order=sort_order',{headers:h}),
+      fetch(SUPABASE_URL+'/rest/v1/kanban_board_view?select=*&archived=eq.false&order=sort_order',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/jarvis_briefings?select=*&order=briefing_date.desc&limit=1',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score,match_quality,url&decision=eq.review&order=score.desc&limit=5',{headers:h})

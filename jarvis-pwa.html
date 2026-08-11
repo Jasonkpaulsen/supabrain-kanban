@@ -181,6 +181,9 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .card-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:5px;}
 .card-proj{font-size:10px;color:var(--tx-d);background:var(--sf);padding:2px 6px;border-radius:4px;border:1px solid var(--card-b);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .card-code{font-family:'SF Mono',SFMono-Regular,Consolas,monospace;font-size:10px;color:var(--tx-m);font-weight:600;letter-spacing:0.3px;}
+/* ADR-FLOW-003: archived cards render read-only-looking when revealed */
+.card.archived{opacity:.55;}
+.card-arch{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 5px;border-radius:4px;background:var(--sf);border:1px solid var(--card-b);color:var(--tx-m);font-family:'SF Mono',monospace;}
 .pri-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .pri-critical{background:var(--red);} .pri-high{background:var(--orange);} .pri-medium{background:var(--blue);} .pri-low{background:var(--tx-m);}
 .card-labels{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px;}
@@ -449,6 +452,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <div class="filter-drawer" id="filt-drawer">
   <div class="fd-title">Filters <button class="fd-close" id="filt-close">&times;</button></div>
   <div class="fd-group"><div class="fd-label">Status</div><div class="fd-chips" id="fd-status"></div></div>
+  <div class="fd-group"><div class="fd-label">Archived</div><div class="fd-chips"><span class="fd-chip" id="fd-archived">Show archived</span></div></div>
   <div class="fd-group"><div class="fd-label">Domain</div><div class="fd-chips" id="fd-domain"></div></div>
   <div class="fd-group"><div class="fd-label">Priority</div><select class="fd-select" id="fd-pri"><option value="all">All</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
   <div class="fd-group"><div class="fd-label">Agent</div><select class="fd-select" id="fd-agent"><option value="all">All</option><option value="__un">Unassigned</option></select></div>
@@ -505,6 +509,8 @@ var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold
 var items=[],projects=[],labels=[],agents=[],agentsById={},projDom={};
 var briefing=null,jobLeads=[],attItems=[];
 var curProj='all',search='',priF='all',domF='all',agentF='all',statusF='all',labelF='all';
+/* ADR-FLOW-003: archived items are hidden by default and revealed by the Archived chip */
+var showArchived=false;
 var curCol='todo',editItem=null,moveItem=null;
 var pulseDismissed=false,pulseTab='pipeline'; /* SB-258 session state */
 
@@ -543,7 +549,7 @@ async function loadAll(){
     var [pR,lR,iR,aR,bR,jR]=await Promise.all([
       fetch(SB_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
-      fetch(SB_URL+'/rest/v1/kanban_board_view?select=*&order=sort_order',{headers:h}),
+      fetch(SB_URL+'/rest/v1/kanban_board_view?select=*'+(showArchived?'':'&archived=eq.false')+'&order=sort_order',{headers:h}),
       fetch(SB_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/jarvis_briefings?select=*&order=briefing_date.desc&limit=1',{headers:h}),
       fetch(SB_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score&decision=eq.review&order=score.desc&limit=5',{headers:h})
@@ -848,9 +854,11 @@ var subH='';if(it.child_count>0){var allDone=it.completed_child_count>=it.child_
 /* SB-207: Dependency indicator */
 var depH='';if(it.blocked_by_count>0){depH='<span class="dep-indicator">🔗 '+it.blocked_by_count+' dep'+(it.blocked_by_count>1?'s':'')+'</span>';}
 /* Build card HTML */
-h+='<div class="card" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
+h+='<div class="card'+(it.archived?' archived':'')+'" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
 /* SB-202: Ticket code FIRST (before priority dot), monospace */
 if(it.ticket_code)h+='<span class="card-code">'+esc(it.ticket_code)+'</span>';
+/* ADR-FLOW-003: archived badge */
+if(it.archived)h+='<span class="card-arch">Archived</span>';
 h+='<span class="pri-dot pri-'+esc(it.priority)+'"></span>';
 /* SB-207: Type badge for non-task types */
 if(it.type&&it.type!=='task'){var _tc={bug:'type-bug',user_story:'type-story',epic:'type-epic'};var _tn={bug:'Bug',user_story:'Story',epic:'Epic'};h+='<span class="type-badge '+(_tc[it.type]||'')+'">'+esc(_tn[it.type]||it.type)+'</span>';}
@@ -920,10 +928,20 @@ document.getElementById('filt-overlay').addEventListener('click',closeFilters);
   sc.querySelectorAll('.fd-chip').forEach(function(c){c.addEventListener('click',function(){sc.querySelectorAll('.fd-chip').forEach(function(x){x.classList.remove('active');});c.classList.add('active');statusF=c.dataset.s;renderBoardContent();});});
 })();
 document.getElementById('fd-domain').addEventListener('click',function(e){var c=e.target.closest('.fd-chip');if(!c)return;this.querySelectorAll('.fd-chip').forEach(function(x){x.classList.remove('active');});c.classList.add('active');domF=c.dataset.d;renderBoardContent();});
+/* ADR-FLOW-003: Archived chip re-fetches with the archived filter dropped.
+   The filter lives in the request, not in filterItems(), so the default board
+   payload stays small; toggling it on is what pulls archived rows down. */
+document.getElementById('fd-archived').addEventListener('click',function(){
+  showArchived=!showArchived;
+  this.classList.toggle('active',showArchived);
+  this.textContent=showArchived?'Hiding nothing':'Show archived';
+  loadAll();
+});
 document.getElementById('fd-pri').addEventListener('change',function(){priF=this.value;renderBoardContent();});
 document.getElementById('fd-agent').addEventListener('change',function(){agentF=this.value;renderBoardContent();});
 document.getElementById('fd-label').addEventListener('change',function(){labelF=this.value;renderBoardContent();});
 document.getElementById('fd-clear').addEventListener('click',function(){statusF='all';domF='all';priF='all';agentF='all';labelF='all';search='';
+  if(showArchived){showArchived=false;var _ac=document.getElementById('fd-archived');_ac.classList.remove('active');_ac.textContent='Show archived';loadAll();}
   document.getElementById('fd-pri').value='all';document.getElementById('fd-agent').value='all';document.getElementById('fd-label').value='all';document.getElementById('b-search').value='';
   document.querySelectorAll('#fd-status .fd-chip').forEach(function(c){c.classList.toggle('active',c.dataset.s==='all');});
   document.querySelectorAll('#fd-domain .fd-chip').forEach(function(c){c.classList.toggle('active',c.dataset.d==='all');});
