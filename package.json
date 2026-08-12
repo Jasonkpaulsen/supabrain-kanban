@@ -1,0 +1,31 @@
+{
+  "name": "supabrain-kanban",
+  "version": "1.0.0",
+  "description": "Mobile-first Progressive Web App kanban board backed by Supabase.",
+  "main": "sw.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:batch1": "playwright test --grep @batch1",
+    "test:batch2": "playwright test --grep @batch2",
+    "test:batch3": "playwright test --grep @batch3",
+    "test:report": "playwright show-report"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jasonkpaulsen/supabrain-kanban.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Jasonkpaulsen/supabrain-kanban/issues"
+  },
+  "homepage": "https://github.com/Jasonkpaulsen/supabrain-kanban#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@supabase/supabase-js": "^2.112.3"
+  }
+}
