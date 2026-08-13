@@ -44,15 +44,16 @@ const json = (route, body) =>
   });
 
 // Map a PostgREST path to its fixture rows.
-function rowsFor(url) {
-  if (url.includes('/rest/v1/projects')) return PAYLOAD.projects;
-  if (url.includes('/rest/v1/labels')) return PAYLOAD.labels;
-  if (url.includes('/rest/v1/agents')) return PAYLOAD.agents;
-  if (url.includes('/rest/v1/kanban_board_view')) return PAYLOAD.items;
+function rowsFor(url, payload) {
+  if (url.includes('/rest/v1/projects')) return payload.projects;
+  if (url.includes('/rest/v1/labels')) return payload.labels;
+  if (url.includes('/rest/v1/agents')) return payload.agents;
+  if (url.includes('/rest/v1/kanban_board_view')) return payload.items;
   return [];
 }
 
-async function installStubs(page) {
+// `payload` defaults to the baseline board; TC-SB118 swaps in the bulk variant.
+async function installStubs(page, payload = PAYLOAD) {
   // Vendored supabase-js in place of the blocked CDN.
   await page.route('**/cdn.jsdelivr.net/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/javascript', path: SUPABASE_UMD })
@@ -68,10 +69,11 @@ async function installStubs(page) {
 
   await page.route('**/rest/v1/**', (route) => {
     if (route.request().method() !== 'GET') {
-      // Batch 1 is read-only: a write here means a test did something it should not.
+      // Batches 1 and 2 are read-only: a write here means a test did something
+      // it should not, and the 405 makes that loud instead of silent.
       return route.fulfill({ status: 405, contentType: 'application/json', body: '{"message":"read-only batch"}' });
     }
-    return json(route, rowsFor(route.request().url()));
+    return json(route, rowsFor(route.request().url(), payload));
   });
 }
 

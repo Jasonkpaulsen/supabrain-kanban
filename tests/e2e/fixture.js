@@ -51,7 +51,10 @@ const SPEC_COLUMNS = [
   { status: 'done', title: 'Done', color: 'rgb(63, 185, 80)' },
 ];
 
-async function login(page) {
+// opts.payload swaps the stubbed board data (TC-SB118 uses the bulk variant).
+// opts.expectTotal is the count the stats strip must reach before the board is
+// considered painted; opts.skipBoard leaves the tab unopened for TC-SB119.
+async function login(page, opts = {}) {
   if (!EMAIL || !PASSWORD) {
     throw new Error(
       'QA_FIXTURE_EMAIL and QA_FIXTURE_PASSWORD must be set — the fixture ' +
@@ -62,16 +65,19 @@ async function login(page) {
   page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
 
-  await installStubs(page);
+  await installStubs(page, opts.payload);
   await page.goto('/jarvis-dashboard.html');
   await page.fill('#login-email', EMAIL);
   await page.fill('#login-password', PASSWORD);
   await page.click('#login-btn');
 
   await expect(page.locator('#login-overlay')).toHaveClass(/hidden/, { timeout: 20000 });
+  if (opts.skipBoard) return consoleErrors;
   await openBoard(page);
   // The board only paints once loadAll() resolves.
-  await expect(page.locator('#s-total')).toHaveText(String(FIXTURE.total), { timeout: 20000 });
+  await expect(page.locator('#s-total')).toHaveText(
+    String(opts.expectTotal ?? FIXTURE.total), { timeout: 30000 }
+  );
   return consoleErrors;
 }
 
