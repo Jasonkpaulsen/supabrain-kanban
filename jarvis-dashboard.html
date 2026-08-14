@@ -807,13 +807,24 @@ function renderBoard(){
   bindCardEvents();
 }
 
-/* ── Card events + drag/drop ── */
+/* ── Card events + drag/drop ──
+   bindCardEvents() runs after every renderBoard(). Only bind things that
+   renderBoard() rebuilds: .card and .add-card-btn are both regenerated from
+   innerHTML each pass, so re-adding their listeners replaces them. The .column
+   elements are static markup and must NOT be bound here — doing so stacked a
+   fresh drop handler on every render, so the Nth drop of a session fired N
+   duplicate move_work_item RPCs (SB-345). Columns are bound once, below. */
 function bindCardEvents(){
   document.querySelectorAll('.card').forEach(function(el){
     el.addEventListener('click',function(){openModal(el.dataset.id);});
     el.addEventListener('dragstart',function(e){dragItem=el.dataset.id;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
     el.addEventListener('dragend',function(){el.classList.remove('dragging');dragItem=null;document.querySelectorAll('.column').forEach(function(c){c.classList.remove('drag-over');});});
   });
+  document.querySelectorAll('.add-card-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();openNewModal(btn.dataset.status);});});
+}
+
+/* Bound exactly once at startup — the columns never get rebuilt. */
+function bindColumnEvents(){
   document.querySelectorAll('.column').forEach(function(column){
     column.addEventListener('dragover',function(e){e.preventDefault();e.dataTransfer.dropEffect='move';column.classList.add('drag-over');});
     column.addEventListener('dragleave',function(e){if(!column.contains(e.relatedTarget))column.classList.remove('drag-over');});
@@ -826,7 +837,6 @@ function bindCardEvents(){
       }catch(err){toast('Move failed: '+err.message,'error');}
     });
   });
-  document.querySelectorAll('.add-card-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();openNewModal(btn.dataset.status);});});
 }
 
 /* ── Modal ── */
@@ -876,7 +886,10 @@ document.getElementById('btn-save-modal').addEventListener('click',async functio
     else{data.sort_order=allItems.filter(function(i){return i.status===data.status;}).length; var res=await fetch(SUPABASE_URL+'/rest/v1/work_items',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw new Error('Create failed'); var rows=await res.json(); itemId=rows[0].id;}
     await fetch(SUPABASE_URL+'/rest/v1/work_item_labels?work_item_id=eq.'+itemId,{method:'DELETE',headers:h});
     if(selectedLabels.length){var lr=selectedLabels.map(function(lid){return{work_item_id:itemId,label_id:lid};}); await fetch(SUPABASE_URL+'/rest/v1/work_item_labels',{method:'POST',headers:h,body:JSON.stringify(lr)});}
-    closeModal(); toast(editingItem?'Updated':'Created','success'); await loadAll();
+    // Capture the mode first: closeModal() nulls editingItem, so reading it
+    // afterwards always reported a create, even on an edit (SB-344).
+    var wasEdit=!!editingItem;
+    closeModal(); toast(wasEdit?'Updated':'Created','success'); await loadAll();
   }catch(err){toast('Save error: '+err.message,'error');}
 });
 document.getElementById('btn-delete-item').addEventListener('click',async function(){
@@ -941,6 +954,7 @@ function routeFromHash(){
 }
 window.addEventListener('hashchange',routeFromHash);
 routeFromHash();
+bindColumnEvents();
 checkSession();
 </script>
 </body>
