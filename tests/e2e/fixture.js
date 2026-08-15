@@ -94,17 +94,20 @@ async function openBoard(page) {
   await expect(page.locator('#board')).toBeVisible();
 }
 
-// Switch the project dropdown and wait for the re-render to settle.
+// Scope the board to one project and wait for the re-render to settle.
+// SB-356 replaced the #project-select dropdown with a pill bar; pills carry the
+// full project name in `title`, so callers still address them by name.
 async function selectProject(page, name) {
-  const value = await page.locator('#project-select option')
-    .filter({ hasText: name }).first().getAttribute('value');
-  await page.selectOption('#project-select', value);
+  const pill = page.locator(`.proj-pill[title="${name}"]`);
+  const value = await pill.getAttribute('data-id');
+  await pill.click();
+  await expect(pill).toHaveClass(/active/);
   await page.waitForTimeout(150);
   return value;
 }
 
 async function selectAllProjects(page) {
-  await page.selectOption('#project-select', 'all');
+  await page.locator('.proj-pill[data-id="all"]').click();
   await page.waitForTimeout(150);
   await expect(page.locator('#s-total')).toHaveText(String(FIXTURE.total));
 }

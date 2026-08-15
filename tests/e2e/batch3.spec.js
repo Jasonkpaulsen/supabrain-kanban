@@ -355,9 +355,9 @@ test.describe('@batch3 SB-341', () => {
     const { errors } = await loginWritable(page);
 
     // Step 1-3: scoping to a project narrows stats and the agent panel together.
-    const value = await page.locator('#project-select option')
-      .filter({ hasText: FIXTURE.alpha.name }).first().getAttribute('value');
-    await page.selectOption('#project-select', value);
+    const pill = page.locator(`.proj-pill[title="${FIXTURE.alpha.name}"]`);
+    const value = await pill.getAttribute('data-id');
+    await pill.click();
     await expect(page.locator('#s-total')).toHaveText(String(FIXTURE.alpha.total));
     await expect(page.locator('#s-done')).toContainText(String(FIXTURE.alpha.done));
     const utilCards = await page.locator('#util-grid .agent-card').count();

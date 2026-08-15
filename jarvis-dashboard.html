@@ -125,6 +125,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .board-header-left { display: flex; align-items: center; gap: 14px; }
 .project-select { background: var(--bg); border: 1px solid var(--card-border); color: var(--text); padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; outline: none; max-width: 320px; }
 .project-select:focus { border-color: var(--accent-blue); }
+/* SB-356 — project pills, replacing the project dropdown. */
+.proj-pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; max-width: 640px; }
+.proj-pills::-webkit-scrollbar { display: none; }
+.proj-pill { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--card-border); background: var(--surface); color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.proj-pill:hover { border-color: var(--card-hover-border); color: var(--text); }
+.proj-pill.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.proj-pill .pill-count { font-size: 11px; background: rgba(255,255,255,.15); padding: 0 6px; border-radius: 8px; min-width: 18px; text-align: center; }
+.proj-pill:not(.active) .pill-count { background: var(--bg); }
 .btn { background: var(--surface); border: 1px solid var(--card-border); color: var(--text); padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 5px; }
 .btn:hover { background: var(--card-bg); border-color: var(--card-hover-border); }
 .btn-primary { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
@@ -216,15 +224,41 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .priority-critical { background: #f85149; } .priority-high { background: #d29922; } .priority-medium { background: #58a6ff; } .priority-low { background: #8b949e; }
 .compliance-badge { font-size: 10px; font-weight: 700; color: #fbd38d; background: rgba(219,109,40,0.16); border: 1px solid rgba(219,109,40,0.4); padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; }
-.status-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; }
+.status-badge { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
 .status-badge.on-hold { color: #d2b7fa; background: rgba(163,113,247,0.16); border: 1px solid rgba(163,113,247,0.4); }
 .status-badge.blocked { color: #fca5a5; background: rgba(248,81,73,0.16); border: 1px solid rgba(248,81,73,0.4); }
 .status-badge.escalated { color: #fbb97a; background: rgba(240,136,62,0.16); border: 1px solid rgba(240,136,62,0.4); }
+
+/* SB-350 — shared card vocabulary for the SB-351..354 indicators.
+   Sizes are the desktop scale, deliberately one step up from the PWA: the
+   ticket code is 11px here against 10px there, and the status badge 9px
+   against 8px, because the dashboard is read at arm's length rather than
+   in the hand.
+   Overflow strategy: .card-meta keeps flex-wrap and every child that can
+   carry unbounded text caps its own width and ellipsises. A dashboard
+   column is min-width 300px — NARROWER than the 375px PWA card — and once
+   SB-351..354 land the row can hold eight children, so wrapping in source
+   order is what keeps a 300px column readable. Deliberately no
+   `margin-left:auto` push on the status badge as the PWA does: at this
+   width a right-pushed badge leaves a ragged hole on the wrap line. */
+.card-code { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-dim); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+.type-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+.type-badge.type-bug { color: #fca5a5; background: rgba(248,81,73,0.16); }
+.type-badge.type-story { color: #a5c8ff; background: rgba(88,166,255,0.16); }
+.type-badge.type-epic { color: #d2b7fa; background: rgba(163,113,247,0.16); }
+.new-badge { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent-red); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px 2px 3px; border-radius: 20px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-muted); max-width: 130px; overflow: hidden; white-space: nowrap; }
+.assignee-chip .av { width: 18px; height: 18px; border-radius: 50%; background: #8b5cf6; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.assignee-chip.unassigned { color: var(--text-dim); border-style: dashed; }
+.subtask-prog { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.subtask-prog.complete { color: var(--accent-green); }
+.dep-indicator { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #f0883e; white-space: nowrap; }
 .card-labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .card-label { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; color: #fff; }
 .card-title { font-size: 14px; font-weight: 500; margin-bottom: 8px; line-height: 1.4; }
 .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-dim); gap: 8px; }
-.card-footer-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-footer-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.card-footer-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .card-due { display: flex; align-items: center; gap: 3px; } .card-due.overdue { color: var(--accent-red); }
 .card-comments { display: flex; align-items: center; gap: 3px; }
 .agent-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px 2px 4px; border-radius: 20px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-muted); }
@@ -326,7 +360,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   <div class="tab-panel" id="panel-board">
     <div class="board-header">
       <div class="board-header-left">
-        <select class="project-select" id="project-select"><option value="all">All Projects</option></select>
+        <div class="proj-pills" id="proj-pills"></div>
         <span id="proj-auto-wrap" style="display:none;align-items:center;gap:6px;margin-left:10px"><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Dev Automation</span><button class="auto-tgl" id="proj-auto-tgl" data-on="0">off</button><span id="proj-auto-hint" style="font-size:11px;color:var(--text-muted)"></span></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
@@ -665,10 +699,39 @@ function renderBoardTab(){
 }
 
 function populateProjectSelect(){
-  var sel=document.getElementById('project-select'), mSel=document.getElementById('m-project');
-  sel.innerHTML='<option value="all">All Projects</option>'; mSel.innerHTML='';
-  allProjects.forEach(function(p){ sel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; mSel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; });
-  sel.value=currentProject;
+  var mSel=document.getElementById('m-project');
+  mSel.innerHTML='';
+  allProjects.forEach(function(p){ mSel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; });
+  renderProjectPills();
+}
+
+/* SB-356 — the board's project filter. Each pill carries the full project name
+   in `title` as well as a short key, so the control is addressable by name for
+   assistive tech and for the test helpers.
+   Deliberate divergence from the PWA (jarvis-pwa.html:717): that bar hides
+   zero-count projects, which on the dashboard would make an empty project
+   unselectable — and the empty-project view is a real one, with its own zeroed
+   stats and placeholders. Every project gets a pill here, count included. */
+function projectShortKey(p){
+  for(var i=0;i<allItems.length;i++){
+    if(allItems[i].project_id===p.id && allItems[i].ticket_code) return allItems[i].ticket_code.split('-')[0];
+  }
+  return (p.name.replace(/[^A-Z]/g,'').substring(0,3)) || p.name.substring(0,3).toUpperCase();
+}
+
+function renderProjectPills(){
+  var cont=document.getElementById('proj-pills'); if(!cont) return;
+  var h='<button class="proj-pill'+(currentProject==='all'?' active':'')+'" data-id="all" title="All Projects">All'
+       +'<span class="pill-count">'+allItems.length+'</span></button>';
+  allProjects.forEach(function(p){
+    var cnt=allItems.filter(function(i){return i.project_id===p.id;}).length;
+    h+='<button class="proj-pill'+(currentProject===p.id?' active':'')+'" data-id="'+p.id+'" title="'+esc(p.name)+'">'
+      +esc((p.icon||'')+' '+projectShortKey(p))+'<span class="pill-count">'+cnt+'</span></button>';
+  });
+  cont.innerHTML=h;
+  cont.querySelectorAll('.proj-pill').forEach(function(pill){
+    pill.addEventListener('click',function(){ currentProject=this.dataset.id; renderProjectPills(); renderBoard(); });
+  });
 }
 function populateAgentFilter(){
   var sel=document.getElementById('agent-filter'), seen={}, opts='<option value="all">All agents</option><option value="__unassigned">Unassigned</option>';
@@ -793,13 +856,33 @@ function renderBoard(){
       var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
       var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
       var statusBadgeHtml=st==='on_hold'?'<span class="status-badge on-hold">ON HOLD</span>':st==='blocked'?'<span class="status-badge blocked">BLOCKED</span>':st==='escalated'?'<span class="status-badge escalated">ESCALATED</span>':'';
+
+      /* SB-350 — slotted card assembly. Each indicator is a named slot that
+         evaluates to '' until its own ticket fills it, so SB-351..354 can land
+         independently without three of them rewriting the same template line.
+         Order within .card-meta is the render order; keep the highest-signal
+         items first, because this row wraps at a 300px column width. */
+      var slotCode='';       /* SB-351 — ticket code, first in the row */
+      var slotType='';       /* SB-354 — type badge for non-task types */
+      var slotNew='';        /* SB-354 — NEW badge, unacknowledged high/critical */
+      var slotSubtasks='';   /* SB-354 — N/M subtask progress (footer-left) */
+      var slotDeps='';       /* SB-354 — blocked-by dependency count (footer-left) */
+      var slotAssignee='';   /* SB-352 — human assignee chip (footer-right) */
+
+      var meta=[slotCode,
+                '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',
+                slotType, slotNew,
+                singleProject?'':'<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>',
+                compHtml, statusBadgeHtml];
+      var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
+      var footRight=[slotAssignee, agentHtml];
+
       html+='<div class="card" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
-      html+='<div class="card-meta"><span class="priority-dot priority-'+esc(item.priority)+'"></span>';
-      if(!singleProject) html+='<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>';
-      if(compHtml)html+=compHtml; if(statusBadgeHtml)html+=statusBadgeHtml; html+='</div>';
+      html+='<div class="card-meta">'+meta.join('')+'</div>';
       if(labels) html+='<div class="card-labels">'+labels+'</div>';
       html+='<div class="card-title">'+esc(item.title)+'</div>';
-      html+='<div class="card-footer"><div class="card-footer-left">'+dueHtml+commentHtml+'</div>'+agentHtml+'</div></div>';
+      html+='<div class="card-footer"><div class="card-footer-left">'+footLeft.join('')+'</div>'
+           +'<div class="card-footer-right">'+footRight.join('')+'</div></div></div>';
     });
     html+='<button class="add-card-btn" data-status="'+st+'">+ Add card</button>';
     col.innerHTML=html;
@@ -904,7 +987,8 @@ document.getElementById('modal-overlay').addEventListener('click',function(e){if
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
 
 /* ── Board filter events ── */
-document.getElementById('project-select').addEventListener('change',function(){currentProject=this.value;renderBoard();});
+/* SB-356 — pill clicks are bound in renderProjectPills(), which rebuilds them
+   on every render; no static listener to attach here. */
 /* ── Per-project dev-automation toggle (ADR-GOV-001) ── */
 function renderProjAutoToggle(){
   var wrap=document.getElementById('proj-auto-wrap'), btn=document.getElementById('proj-auto-tgl'), hint=document.getElementById('proj-auto-hint');
