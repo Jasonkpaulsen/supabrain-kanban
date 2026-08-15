@@ -272,6 +272,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .modal { background: var(--surface); border: 1px solid var(--card-border); border-radius: 14px; width: 100%; max-width: 620px; max-height: 86vh; overflow-y: auto; box-shadow: 0 16px 48px rgba(0,0,0,0.5); }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 24px 12px; border-bottom: 1px solid var(--divider); }
 .modal-header h2 { font-size: 18px; font-weight: 600; flex: 1; }
+/* SB-355 — modal header identity and footer provenance. */
+.modal-title-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.modal-ticket-badge { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-dim); background: var(--surface); border: 1px solid var(--card-border); padding: 2px 8px; border-radius: 5px; }
+.modal-type-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+.modal-type-badge.modal-type-bug { color: #fca5a5; background: rgba(248,81,73,0.16); }
+.modal-type-badge.modal-type-story { color: #a5c8ff; background: rgba(88,166,255,0.16); }
+.modal-type-badge.modal-type-epic { color: #d2b7fa; background: rgba(163,113,247,0.16); }
+.status-select-wrap { display: flex; align-items: center; gap: 8px; }
+.status-select-wrap select { flex: 1; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: #8b949e; }
+.modal-timestamps { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); padding: 10px 0 2px; border-top: 1px solid var(--divider); margin-top: 4px; }
 .modal-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px; } .modal-close:hover { background: var(--card-bg); color: var(--text); }
 .modal-body { padding: 16px 24px 24px; }
 .modal-row { display: flex; gap: 12px; margin-bottom: 14px; }
@@ -415,14 +426,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <!-- Card Modal -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal">
-    <div class="modal-header"><h2 id="modal-title">New Work Item</h2><button class="modal-close" id="modal-close">&times;</button></div>
+    <div class="modal-header"><div class="modal-title-wrap"><span class="modal-ticket-badge" id="m-ticket-badge" style="display:none"></span><span class="modal-type-badge" id="m-type-badge" style="display:none"></span><h2 id="modal-title">New Work Item</h2></div><button class="modal-close" id="modal-close">&times;</button></div>
     <div class="modal-body">
       <div class="modal-row"><div class="modal-field"><label>Title</label><input id="m-title" placeholder="What needs to be done?"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Description</label><textarea id="m-desc" placeholder="Details, context, acceptance criteria..."></textarea></div></div>
-      <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div>
+      <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><div class="status-select-wrap"><span class="status-dot" id="m-status-dot"></span><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div></div>
       <div class="modal-row"><div class="modal-field"><label>Priority</label><select id="m-priority"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div><div class="modal-field"><label>Assignee</label><input id="m-assignee" placeholder="Who?"></div><div class="modal-field"><label>Due Date</label><input type="date" id="m-due"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Labels</label><div class="modal-labels" id="m-labels"></div></div></div>
       <div class="comments-section" id="comments-section" style="display:none"><h3>Comments</h3><div id="comments-list"></div><div class="comment-input-row"><input id="comment-input" placeholder="Add a comment..."><button class="btn btn-primary" id="btn-add-comment">Add</button></div></div>
+      <div class="modal-timestamps" id="m-timestamps" style="display:none"><span id="m-created"></span><span id="m-updated"></span></div>
       <div class="modal-actions"><button class="btn btn-delete" id="btn-delete-item" style="display:none;margin-right:auto">Delete</button><button class="btn" id="btn-cancel-modal">Cancel</button><button class="btn btn-primary" id="btn-save-modal">Save</button></div>
     </div>
   </div>
@@ -973,6 +985,43 @@ function bindColumnEvents(){
 }
 
 /* ── Modal ── */
+
+/* SB-355 — header identity and footer provenance, shared by both open paths.
+   Passing null resets everything, which is what the new-item path wants. */
+function setModalIdentity(item){
+  var tb=document.getElementById('m-ticket-badge'), yb=document.getElementById('m-type-badge'),
+      ts=document.getElementById('m-timestamps');
+  if(item&&item.ticket_code){ tb.textContent=item.ticket_code; tb.style.display='inline'; }
+  else tb.style.display='none';
+
+  if(item&&item.type&&item.type!=='task'){
+    var cls={bug:'modal-type-bug',user_story:'modal-type-story',epic:'modal-type-epic'};
+    var nm={bug:'Bug',user_story:'Story',epic:'Epic'};
+    yb.className='modal-type-badge '+(cls[item.type]||''); yb.textContent=nm[item.type]||item.type;
+    yb.style.display='inline';
+  } else yb.style.display='none';
+
+  if(item&&(item.created_at||item.updated_at)){
+    document.getElementById('m-created').textContent=item.created_at?'⏰ Created: '+fmtStamp(item.created_at):'';
+    document.getElementById('m-updated').textContent=item.updated_at?'✏ Updated: '+fmtStamp(item.updated_at):'';
+    ts.style.display='flex';
+  } else ts.style.display='none';
+}
+
+function fmtStamp(iso){
+  var d=new Date(iso);
+  return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+
+/* SB-355 — the status colour indicator. Reads the dropdown rather than taking a
+   status argument, so the same call serves both open paths and the change
+   listener. Deliberately NOT bound inside an open path: SB-348 is the PWA bug
+   where exactly that left the indicator stale on the edit path. */
+function syncStatusDot(){
+  var dot=document.getElementById('m-status-dot');
+  dot.style.background=STAT_COLORS[document.getElementById('m-status').value]||'#8b949e';
+}
+
 function openNewModal(status){
   editingItem=null; document.getElementById('modal-title').textContent='New Work Item';
   document.getElementById('m-title').value=''; document.getElementById('m-desc').value='';
@@ -980,6 +1029,7 @@ function openNewModal(status){
   document.getElementById('m-assignee').value=''; document.getElementById('m-due').value='';
   if(currentProject!=='all')document.getElementById('m-project').value=currentProject;
   document.getElementById('btn-delete-item').style.display='none'; document.getElementById('comments-section').style.display='none';
+  setModalIdentity(null); syncStatusDot();
   renderLabelChips([]); document.getElementById('modal-overlay').classList.add('active');
 }
 async function openModal(itemId){
@@ -990,6 +1040,7 @@ async function openModal(itemId){
   document.getElementById('m-priority').value=item.priority; document.getElementById('m-assignee').value=item.assignee||'';
   document.getElementById('m-due').value=item.due_date||''; document.getElementById('btn-delete-item').style.display='inline-flex';
   renderLabelChips((item.labels||[]).map(function(l){return l.id;}));
+  setModalIdentity(item); syncStatusDot();
   document.getElementById('comments-section').style.display='block'; await loadComments(itemId);
   document.getElementById('modal-overlay').classList.add('active');
 }
@@ -1039,6 +1090,10 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()
 /* ── Board filter events ── */
 /* SB-356 — pill clicks are bound in renderProjectPills(), which rebuilds them
    on every render; no static listener to attach here. */
+/* SB-355 — bound once, at startup. #m-status is static markup, so this is the
+   only binding either open path needs; see SB-348 for what per-path binding
+   costs. */
+document.getElementById('m-status').addEventListener('change', syncStatusDot);
 /* ── Per-project dev-automation toggle (ADR-GOV-001) ── */
 function renderProjAutoToggle(){
   var wrap=document.getElementById('proj-auto-wrap'), btn=document.getElementById('proj-auto-tgl'), hint=document.getElementById('proj-auto-hint');

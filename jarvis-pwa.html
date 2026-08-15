@@ -509,6 +509,18 @@ var DL=DL_FALLBACK; // overridden dynamically from briefing data
 var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
 var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950'};
 var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done'};
+/* SB-348 — the handler that recolours #m-status-dot used to be assigned inside
+   openNewModal() only. openModal() (the edit path) set the initial colour but
+   never bound the handler, so changing status on an existing card left the
+   indicator stale. It hid itself once the new-item modal had been opened in a
+   session, because onchange is a property assignment that sticks on the
+   element. Bound once here instead; #m-status is static markup. */
+document.addEventListener('DOMContentLoaded',function(){
+  var sel=document.getElementById('m-status'); if(!sel)return;
+  sel.addEventListener('change',function(){
+    document.getElementById('m-status-dot').style.background=STAT_COLORS[this.value]||'#8b949e';
+  });
+});
 
 var items=[],projects=[],labels=[],agents=[],agentsById={},projDom={};
 var briefing=null,jobLeads=[],attItems=[];
@@ -992,7 +1004,7 @@ function openNewModal(st){
   document.getElementById('m-due').value='';document.getElementById('m-assignee').value='';document.getElementById('m-ticket-badge').style.display='none';document.getElementById('m-type-badge').style.display='none';document.getElementById('m-timestamps').style.display='none';document.getElementById('m-status-dot').style.background=STAT_COLORS['backlog']||'#8b949e';
   if(curProj!=='all')document.getElementById('m-proj').value=curProj;
   document.getElementById('btn-del').style.display='none';document.getElementById('cmt-s').style.display='none';
-  renderLabelChips([]);document.getElementById('modal-bg').classList.add('open');document.getElementById('m-status').onchange=function(){document.getElementById('m-status-dot').style.background=STAT_COLORS[this.value]||'#8b949e';};
+  renderLabelChips([]);document.getElementById('modal-bg').classList.add('open');
 }
 async function openModal(itemId){
   var it=items.find(function(i){return i.id===itemId;});if(!it)return;editItem=it;
