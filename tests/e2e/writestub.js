@@ -112,7 +112,13 @@ async function installWriteStubs(page, seed) {
 
     // ── work_items ──
     if (url.includes('/rest/v1/work_items')) {
-      if (method === 'GET') return json(route, state.items);
+      if (method === 'GET') {
+        // PostgREST honours `id=eq.<uuid>`; returning the whole table here made
+        // the stub a worse liar than the real API and broke a caller that reads
+        // a single row back (SB-358).
+        const id = idFromEq(url, 'id');
+        return json(route, id ? state.items.filter((i) => i.id === id) : state.items);
+      }
       if (method === 'POST') {
         const row = newItem(body);
         state.items.push(row);
