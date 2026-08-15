@@ -976,12 +976,62 @@ function bindColumnEvents(){
     column.addEventListener('drop',async function(e){
       e.preventDefault(); column.classList.remove('drag-over'); if(!dragItem)return;
       var newStatus=column.dataset.status, body=column.querySelector('.column-body'), newOrder=body?body.querySelectorAll('.card').length:0;
-      try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/rpc/move_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:dragItem,p_new_status:newStatus,p_new_sort_order:newOrder})}); if(!res.ok){var t=await res.text();throw new Error(t);}
-        for(var i=0;i<allItems.length;i++){if(allItems[i].id===dragItem){allItems[i].status=newStatus;allItems[i].sort_order=newOrder;if(newStatus==='done')allItems[i].completed_at=new Date().toISOString();break;}}
-        renderBoard(); toast('Moved to '+newStatus.replace('_',' '),'success');
+      try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/rpc/move_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:dragItem,p_new_status:newStatus,p_new_sort_order:newOrder})}); if(!res.ok){throw await serverError(res,'Move failed');}
+
+        /* SB-358 — do not assume the stored status is the one we asked for.
+           enforce_wip_limit does not raise when an assignee is at their limit:
+           it rewrites the status to on_hold and returns success. Applying
+           newStatus blindly here is what made the board show In Progress over a
+           row that said on_hold, with a toast confirming a move that never
+           happened. move_work_item RETURNS VOID, so the stored value has to be
+           read back rather than taken from the response. */
+        var stored=newStatus;
+        try{
+          var vr=await fetch(SUPABASE_URL+'/rest/v1/work_items?select=id,status,sort_order&id=eq.'+dragItem,{headers:h});
+          if(vr.ok){
+            var vrows=await vr.json();
+            /* Match on id rather than taking [0]: a filter the server ignored
+               would otherwise silently reconcile against the wrong row. */
+            var mine=(vrows||[]).filter(function(r){return r.id===dragItem;});
+            if(mine.length===1&&mine[0].status) stored=mine[0].status;
+          }
+        }catch(e){ /* read-back is best effort; fall through to the requested status */ }
+
+        for(var i=0;i<allItems.length;i++){if(allItems[i].id===dragItem){allItems[i].status=stored;allItems[i].sort_order=newOrder;if(stored==='done')allItems[i].completed_at=new Date().toISOString();break;}}
+        renderBoard();
+        if(stored!==newStatus) toast('Moved to '+stored.replace('_',' ')+', not '+newStatus.replace('_',' ')+' — a server rule redirected it','error');
+        else toast('Moved to '+newStatus.replace('_',' '),'success');
       }catch(err){toast('Move failed: '+err.message,'error');}
     });
   });
+}
+
+/* SB-359 — one place that turns a failed response into something a person can
+   act on. The two failure modes this replaces were opposite and both wrong: the
+   move handler threw the raw PostgREST body straight into a toast (JSON,
+   SQLSTATE, trigger name and all), while save/create/delete/comment threw fixed
+   strings like 'Update failed' that discarded the server's reason entirely — so
+   a save that tripped enforce_review_assignee said nothing about reviewers.
+   The raw text still goes to the console; only the toast is cleaned up. */
+async function serverError(res, fallback){
+  var raw='';
+  try{ raw=await res.text(); }catch(e){}
+  console.error('Request failed', res.status, raw);
+  var msg='';
+  try{
+    var b=JSON.parse(raw);
+    msg=b.message||b.error_description||b.error||b.hint||b.details||'';
+  }catch(e){
+    /* Not JSON. A short plain sentence is worth showing; markup or a payload is
+       not — a 502 HTML error page is still a payload, just a different one. */
+    msg=(raw&&raw.length<200&&!/[<>{}]/.test(raw))?raw.trim():'';
+  }
+  if(!msg) return new Error(fallback+' (HTTP '+res.status+')');
+  /* Application errors follow an "SB-nnn: explanation" convention in the
+     triggers. Keep the explanation, drop the code into the console only. */
+  var m=msg.match(/^([A-Z]{2,4}-\d+):\s*(.+)$/);
+  if(m) return new Error(m[2].charAt(0).toUpperCase()+m[2].slice(1));
+  return new Error(msg);
 }
 
 /* ── Modal ── */
@@ -1057,7 +1107,7 @@ async function loadComments(itemId){
 }
 document.getElementById('btn-add-comment').addEventListener('click',async function(){
   if(!editingItem)return; var input=document.getElementById('comment-input'), body=input.value.trim(); if(!body)return;
-  try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/work_item_comments',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify({work_item_id:editingItem.id,body:body})}); if(!res.ok)throw new Error('Failed'); input.value=''; await loadComments(editingItem.id);
+  try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/work_item_comments',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify({work_item_id:editingItem.id,body:body})}); if(!res.ok)throw await serverError(res,'Comment failed'); input.value=''; await loadComments(editingItem.id);
     for(var i=0;i<allItems.length;i++){if(allItems[i].id===editingItem.id){allItems[i].comment_count=(allItems[i].comment_count||0)+1;break;}} renderBoard();
   }catch(e){toast('Comment failed: '+e.message,'error');}
 });
@@ -1065,20 +1115,27 @@ document.getElementById('btn-save-modal').addEventListener('click',async functio
   var title=document.getElementById('m-title').value.trim(); if(!title){toast('Title is required','error');return;}
   var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-project').value,status:document.getElementById('m-status').value,priority:document.getElementById('m-priority').value,assignee:document.getElementById('m-assignee').value.trim()||null,due_date:document.getElementById('m-due').value||null,updated_at:new Date().toISOString()};
   var selectedLabels=[]; document.querySelectorAll('#m-labels .label-chip.selected').forEach(function(c){selectedLabels.push(c.dataset.id);});
-  try{var h=await getHeaders(); var itemId;
-    if(editingItem){var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'PATCH',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw new Error('Update failed'); itemId=editingItem.id;}
-    else{data.sort_order=allItems.filter(function(i){return i.status===data.status;}).length; var res=await fetch(SUPABASE_URL+'/rest/v1/work_items',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw new Error('Create failed'); var rows=await res.json(); itemId=rows[0].id;}
+  try{var h=await getHeaders(); var itemId, storedStatus=null;
+    if(editingItem){var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'PATCH',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw await serverError(res,'Update failed'); var urows=await res.json(); itemId=editingItem.id; storedStatus=(urows&&urows[0])?urows[0].status:null;}
+    else{data.sort_order=allItems.filter(function(i){return i.status===data.status;}).length; var res=await fetch(SUPABASE_URL+'/rest/v1/work_items',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw await serverError(res,'Create failed'); var rows=await res.json(); itemId=rows[0].id; storedStatus=rows[0].status;}
     await fetch(SUPABASE_URL+'/rest/v1/work_item_labels?work_item_id=eq.'+itemId,{method:'DELETE',headers:h});
     if(selectedLabels.length){var lr=selectedLabels.map(function(lid){return{work_item_id:itemId,label_id:lid};}); await fetch(SUPABASE_URL+'/rest/v1/work_item_labels',{method:'POST',headers:h,body:JSON.stringify(lr)});}
     // Capture the mode first: closeModal() nulls editingItem, so reading it
     // afterwards always reported a create, even on an edit (SB-344).
     var wasEdit=!!editingItem;
-    closeModal(); toast(wasEdit?'Updated':'Created','success'); await loadAll();
+    closeModal();
+    /* SB-358 — this path asks for representation, so the stored row is already
+       in hand; no extra read needed. If a server rule rewrote the status, say so
+       rather than reporting a clean save. */
+    if(storedStatus&&storedStatus!==data.status)
+      toast((wasEdit?'Updated':'Created')+', but saved as '+storedStatus.replace('_',' ')+' — a server rule redirected it','error');
+    else toast(wasEdit?'Updated':'Created','success');
+    await loadAll();
   }catch(err){toast('Save error: '+err.message,'error');}
 });
 document.getElementById('btn-delete-item').addEventListener('click',async function(){
   if(!editingItem||!confirm('Delete this work item?'))return;
-  try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'DELETE',headers:h}); if(!res.ok)throw new Error('Delete failed'); closeModal(); toast('Deleted','success'); await loadAll();
+  try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'DELETE',headers:h}); if(!res.ok)throw await serverError(res,'Delete failed'); closeModal(); toast('Deleted','success'); await loadAll();
   }catch(err){toast('Delete error: '+err.message,'error');}
 });
 function closeModal(){document.getElementById('modal-overlay').classList.remove('active');editingItem=null;}
