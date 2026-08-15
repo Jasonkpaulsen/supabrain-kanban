@@ -114,4 +114,36 @@ function cardByTitle(page, title) {
   return page.locator('.card').filter({ has: page.locator('.card-title', { hasText: title }) }).first();
 }
 
-module.exports = { FIXTURE, SPEC_COLUMNS, login, openBoard, selectProject, selectAllProjects, cardByTitle };
+// ── PWA (jarvis-pwa.html) ────────────────────────────────────────────────────
+// The PWA is a separate document with its own login form and a one-column-at-a-
+// time board, so it needs its own helpers. Same stub, same fixture user.
+async function loginPwa(page, opts = {}) {
+  if (!EMAIL || !PASSWORD) {
+    throw new Error('QA_FIXTURE_EMAIL and QA_FIXTURE_PASSWORD must be set.');
+  }
+  const consoleErrors = [];
+  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('pageerror', (e) => consoleErrors.push(String(e)));
+
+  await installStubs(page, opts.payload);
+  await page.goto('/jarvis-pwa.html');
+  await page.fill('#l-email', EMAIL);
+  await page.fill('#l-pass', PASSWORD);
+  await page.click('#l-btn');
+  await expect(page.locator('#login-overlay')).toBeHidden({ timeout: 20000 });
+  await page.click('.nav-btn[data-tab="board"]');
+  await expect(page.locator('#cards-area')).toBeVisible({ timeout: 30000 });
+  return consoleErrors;
+}
+
+// The PWA shows one status column at a time; switch to `status` and settle.
+async function pwaColumn(page, status) {
+  await page.click(`.col-tab[data-st="${status}"]`);
+  await expect(page.locator(`.col-tab[data-st="${status}"]`)).toHaveClass(/active/);
+  await page.waitForTimeout(100);
+}
+
+module.exports = {
+  FIXTURE, SPEC_COLUMNS, login, openBoard, selectProject, selectAllProjects,
+  cardByTitle, loginPwa, pwaColumn,
+};
