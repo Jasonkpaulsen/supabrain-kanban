@@ -861,7 +861,11 @@ function renderBoard(){
       var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
       var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
       var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
-      var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
+      /* SB-352 — the agent chip no longer doubles as the unassigned marker.
+         An item with a human assignee and no agent is assigned, so it must not
+         read "Unassigned"; the fallback now fires only when BOTH are absent. */
+      var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'';
+      if(!item.assignee&&!item.agent_name) agentHtml='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
       var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
       /* SB-353 — a badge for every status, not just the three exception ones.
          Colour comes from STAT_COLORS with the background at 15% opacity (hex
@@ -878,11 +882,42 @@ function renderBoard(){
       /* SB-351 — ticket code leads the meta row. Omitted entirely when the item
          has none, so no placeholder or gap is left behind (TC-202-03). */
       var slotCode=item.ticket_code?'<span class="card-code">'+esc(item.ticket_code)+'</span>':'';
-      var slotType='';       /* SB-354 — type badge for non-task types */
-      var slotNew='';        /* SB-354 — NEW badge, unacknowledged high/critical */
-      var slotSubtasks='';   /* SB-354 — N/M subtask progress (footer-left) */
-      var slotDeps='';       /* SB-354 — blocked-by dependency count (footer-left) */
-      var slotAssignee='';   /* SB-352 — human assignee chip (footer-right) */
+      /* SB-354 — type badge, non-task types only. A board of tasks would gain
+         nothing from every card announcing "TASK". */
+      var slotType='';
+      if(item.type&&item.type!=='task'){
+        var tCls={bug:'type-bug',user_story:'type-story',epic:'type-epic'};
+        var tName={bug:'Bug',user_story:'Story',epic:'Epic'};
+        slotType='<span class="type-badge '+(tCls[item.type]||'')+'">'+esc(tName[item.type]||item.type)+'</span>';
+      }
+
+      /* SB-354 — attention marker. High and critical only: an unacknowledged
+         low-priority item is not news, and badging everything would make the
+         badge mean nothing. */
+      var slotNew=(item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
+                  ?'<span class="new-badge">NEW</span>':'';
+
+      /* SB-354 — subtask progress. Both counts already arrive via select=*. */
+      var slotSubtasks='';
+      if(item.child_count>0){
+        var allDone=item.completed_child_count>=item.child_count;
+        slotSubtasks='<span class="subtask-prog'+(allDone?' complete':'')+'">✓ '
+                    +item.completed_child_count+'/'+item.child_count+'</span>';
+      }
+
+      /* SB-354 — why a card might be stuck, without opening it. */
+      var slotDeps=item.blocked_by_count>0
+                   ?'<span class="dep-indicator">🔗 '+item.blocked_by_count+' dep'+(item.blocked_by_count>1?'s':'')+'</span>'
+                   :'';
+      /* SB-352 — human assignee, primary to the agent chip that follows it.
+         Shows an initials avatar plus the first name only; the full name is on
+         the title attribute, which is also how the pill/chip stays addressable. */
+      var slotAssignee='';
+      if(item.assignee){
+        var ini=item.assignee.split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase();
+        slotAssignee='<span class="assignee-chip" title="'+esc(item.assignee)+'"><span class="av">'+esc(ini)+'</span>'
+                    +esc(item.assignee.split(' ')[0])+'</span>';
+      }
 
       var meta=[slotCode,
                 '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',

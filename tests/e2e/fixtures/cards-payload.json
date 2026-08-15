@@ -588,7 +588,7 @@
   {
    "id": "00000000-0000-4000-8000-000000000025",
    "type": "task",
-   "title": "Dependency card",
+   "title": "Twin dependency card",
    "labels": [],
    "status": "todo",
    "archived": false,
@@ -642,7 +642,7 @@
   {
    "id": "00000000-0000-4000-8000-000000000027",
    "type": "task",
-   "title": "Unack high card",
+   "title": "Fresh high card",
    "labels": [],
    "status": "todo",
    "archived": false,
@@ -669,7 +669,7 @@
   {
    "id": "00000000-0000-4000-8000-000000000028",
    "type": "task",
-   "title": "Ack high card",
+   "title": "Seen high card",
    "labels": [],
    "status": "todo",
    "archived": false,
@@ -696,7 +696,7 @@
   {
    "id": "00000000-0000-4000-8000-000000000029",
    "type": "task",
-   "title": "Unack medium card",
+   "title": "Fresh medium card",
    "labels": [],
    "status": "todo",
    "archived": false,

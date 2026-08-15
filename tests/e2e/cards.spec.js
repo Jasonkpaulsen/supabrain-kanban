@@ -468,24 +468,24 @@ test.describe('@cards SB-207', () => {
 
   test('TC-207-03 blocked-by dependency count displays when present', async ({ page, browser }) => {
     await loginPwa(page, opts);
-    await expect(pwaCard(page, 'Dependency card').locator('.dep-indicator')).toContainText('2 deps');
+    await expect(pwaCard(page, 'Twin dependency card').locator('.dep-indicator')).toContainText('2 deps');
     await expect(pwaCard(page, 'Single dependency card').locator('.dep-indicator'))
       .toContainText('1 dep');
     await expect(pwaCard(page, 'Human assignee card').locator('.dep-indicator')).toHaveCount(0);
 
     const page2 = await dashPage(browser, opts);
-    await expect(dashCard(page2, 'Dependency card').locator('.dep-indicator'),
+    await expect(dashCard(page2, 'Twin dependency card').locator('.dep-indicator'),
       'dashboard renders no dependency indicator').toHaveCount(1);
   });
 
   test('TC-207-04 unacknowledged high/critical items show attention indicator', async ({ page, browser }) => {
     await loginPwa(page, opts);
-    await expect(pwaCard(page, 'Unack high card').locator('.new-badge')).toBeVisible();
-    await expect(pwaCard(page, 'Ack high card').locator('.new-badge')).toHaveCount(0);
-    await expect(pwaCard(page, 'Unack medium card').locator('.new-badge')).toHaveCount(0);
+    await expect(pwaCard(page, 'Fresh high card').locator('.new-badge')).toBeVisible();
+    await expect(pwaCard(page, 'Seen high card').locator('.new-badge')).toHaveCount(0);
+    await expect(pwaCard(page, 'Fresh medium card').locator('.new-badge')).toHaveCount(0);
 
     const page2 = await dashPage(browser, opts);
-    await expect(dashCard(page2, 'Unack high card').locator('.new-badge'),
+    await expect(dashCard(page2, 'Fresh high card').locator('.new-badge'),
       'dashboard renders no attention indicator').toHaveCount(1);
   });
 
