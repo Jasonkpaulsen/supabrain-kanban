@@ -125,6 +125,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .board-header-left { display: flex; align-items: center; gap: 14px; }
 .project-select { background: var(--bg); border: 1px solid var(--card-border); color: var(--text); padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; outline: none; max-width: 320px; }
 .project-select:focus { border-color: var(--accent-blue); }
+/* SB-356 — project pills, replacing the project dropdown. */
+.proj-pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; max-width: 640px; }
+.proj-pills::-webkit-scrollbar { display: none; }
+.proj-pill { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--card-border); background: var(--surface); color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.proj-pill:hover { border-color: var(--card-hover-border); color: var(--text); }
+.proj-pill.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.proj-pill .pill-count { font-size: 11px; background: rgba(255,255,255,.15); padding: 0 6px; border-radius: 8px; min-width: 18px; text-align: center; }
+.proj-pill:not(.active) .pill-count { background: var(--bg); }
 .btn { background: var(--surface); border: 1px solid var(--card-border); color: var(--text); padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 5px; }
 .btn:hover { background: var(--card-bg); border-color: var(--card-hover-border); }
 .btn-primary { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
@@ -216,15 +224,42 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .priority-critical { background: #f85149; } .priority-high { background: #d29922; } .priority-medium { background: #58a6ff; } .priority-low { background: #8b949e; }
 .compliance-badge { font-size: 10px; font-weight: 700; color: #fbd38d; background: rgba(219,109,40,0.16); border: 1px solid rgba(219,109,40,0.4); padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; }
-.status-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; }
-.status-badge.on-hold { color: #d2b7fa; background: rgba(163,113,247,0.16); border: 1px solid rgba(163,113,247,0.4); }
-.status-badge.blocked { color: #fca5a5; background: rgba(248,81,73,0.16); border: 1px solid rgba(248,81,73,0.4); }
-.status-badge.escalated { color: #fbb97a; background: rgba(240,136,62,0.16); border: 1px solid rgba(240,136,62,0.4); }
+.status-badge { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+/* SB-353 — the on-hold/blocked/escalated variants are gone: colour is now set
+   inline from STAT_COLORS for all eight statuses. The old variants used lighter
+   tints (#d2b7fa for on_hold against the canonical #a371f7), which is exactly
+   the drift TC-204-02 pins down. */
+
+/* SB-350 — shared card vocabulary for the SB-351..354 indicators.
+   Sizes are the desktop scale, deliberately one step up from the PWA: the
+   ticket code is 11px here against 10px there, and the status badge 9px
+   against 8px, because the dashboard is read at arm's length rather than
+   in the hand.
+   Overflow strategy: .card-meta keeps flex-wrap and every child that can
+   carry unbounded text caps its own width and ellipsises. A dashboard
+   column is min-width 300px — NARROWER than the 375px PWA card — and once
+   SB-351..354 land the row can hold eight children, so wrapping in source
+   order is what keeps a 300px column readable. Deliberately no
+   `margin-left:auto` push on the status badge as the PWA does: at this
+   width a right-pushed badge leaves a ragged hole on the wrap line. */
+.card-code { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-dim); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+.type-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+.type-badge.type-bug { color: #fca5a5; background: rgba(248,81,73,0.16); }
+.type-badge.type-story { color: #a5c8ff; background: rgba(88,166,255,0.16); }
+.type-badge.type-epic { color: #d2b7fa; background: rgba(163,113,247,0.16); }
+.new-badge { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent-red); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px 2px 3px; border-radius: 20px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-muted); max-width: 130px; overflow: hidden; white-space: nowrap; }
+.assignee-chip .av { width: 18px; height: 18px; border-radius: 50%; background: #8b5cf6; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.assignee-chip.unassigned { color: var(--text-dim); border-style: dashed; }
+.subtask-prog { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.subtask-prog.complete { color: var(--accent-green); }
+.dep-indicator { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #f0883e; white-space: nowrap; }
 .card-labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .card-label { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; color: #fff; }
 .card-title { font-size: 14px; font-weight: 500; margin-bottom: 8px; line-height: 1.4; }
 .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-dim); gap: 8px; }
-.card-footer-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-footer-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.card-footer-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .card-due { display: flex; align-items: center; gap: 3px; } .card-due.overdue { color: var(--accent-red); }
 .card-comments { display: flex; align-items: center; gap: 3px; }
 .agent-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px 2px 4px; border-radius: 20px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-muted); }
@@ -237,6 +272,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .modal { background: var(--surface); border: 1px solid var(--card-border); border-radius: 14px; width: 100%; max-width: 620px; max-height: 86vh; overflow-y: auto; box-shadow: 0 16px 48px rgba(0,0,0,0.5); }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 24px 12px; border-bottom: 1px solid var(--divider); }
 .modal-header h2 { font-size: 18px; font-weight: 600; flex: 1; }
+/* SB-355 — modal header identity and footer provenance. */
+.modal-title-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.modal-ticket-badge { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-dim); background: var(--surface); border: 1px solid var(--card-border); padding: 2px 8px; border-radius: 5px; }
+.modal-type-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+.modal-type-badge.modal-type-bug { color: #fca5a5; background: rgba(248,81,73,0.16); }
+.modal-type-badge.modal-type-story { color: #a5c8ff; background: rgba(88,166,255,0.16); }
+.modal-type-badge.modal-type-epic { color: #d2b7fa; background: rgba(163,113,247,0.16); }
+.status-select-wrap { display: flex; align-items: center; gap: 8px; }
+.status-select-wrap select { flex: 1; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: #8b949e; }
+.modal-timestamps { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); padding: 10px 0 2px; border-top: 1px solid var(--divider); margin-top: 4px; }
 .modal-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px; } .modal-close:hover { background: var(--card-bg); color: var(--text); }
 .modal-body { padding: 16px 24px 24px; }
 .modal-row { display: flex; gap: 12px; margin-bottom: 14px; }
@@ -326,7 +372,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   <div class="tab-panel" id="panel-board">
     <div class="board-header">
       <div class="board-header-left">
-        <select class="project-select" id="project-select"><option value="all">All Projects</option></select>
+        <div class="proj-pills" id="proj-pills"></div>
         <span id="proj-auto-wrap" style="display:none;align-items:center;gap:6px;margin-left:10px"><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Dev Automation</span><button class="auto-tgl" id="proj-auto-tgl" data-on="0">off</button><span id="proj-auto-hint" style="font-size:11px;color:var(--text-muted)"></span></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
@@ -380,14 +426,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <!-- Card Modal -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal">
-    <div class="modal-header"><h2 id="modal-title">New Work Item</h2><button class="modal-close" id="modal-close">&times;</button></div>
+    <div class="modal-header"><div class="modal-title-wrap"><span class="modal-ticket-badge" id="m-ticket-badge" style="display:none"></span><span class="modal-type-badge" id="m-type-badge" style="display:none"></span><h2 id="modal-title">New Work Item</h2></div><button class="modal-close" id="modal-close">&times;</button></div>
     <div class="modal-body">
       <div class="modal-row"><div class="modal-field"><label>Title</label><input id="m-title" placeholder="What needs to be done?"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Description</label><textarea id="m-desc" placeholder="Details, context, acceptance criteria..."></textarea></div></div>
-      <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div>
+      <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><div class="status-select-wrap"><span class="status-dot" id="m-status-dot"></span><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div></div>
       <div class="modal-row"><div class="modal-field"><label>Priority</label><select id="m-priority"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div><div class="modal-field"><label>Assignee</label><input id="m-assignee" placeholder="Who?"></div><div class="modal-field"><label>Due Date</label><input type="date" id="m-due"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Labels</label><div class="modal-labels" id="m-labels"></div></div></div>
       <div class="comments-section" id="comments-section" style="display:none"><h3>Comments</h3><div id="comments-list"></div><div class="comment-input-row"><input id="comment-input" placeholder="Add a comment..."><button class="btn btn-primary" id="btn-add-comment">Add</button></div></div>
+      <div class="modal-timestamps" id="m-timestamps" style="display:none"><span id="m-created"></span><span id="m-updated"></span></div>
       <div class="modal-actions"><button class="btn btn-delete" id="btn-delete-item" style="display:none;margin-right:auto">Delete</button><button class="btn" id="btn-cancel-modal">Cancel</button><button class="btn btn-primary" id="btn-save-modal">Save</button></div>
     </div>
   </div>
@@ -402,6 +449,13 @@ var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', gambling:'#f85149', 'prediction-markets':'#f85149' };
+/* SB-353 — the status palette as data. These values already existed in three
+   places in the stylesheet (.col-* .column-title, .ac-bar .b-*, the old
+   .status-badge variants); the card badge needs them at runtime to colour all
+   eight statuses, and SB-355 will need them again for the modal indicator.
+   Kept identical to jarvis-pwa.html:506-507 so the two surfaces cannot drift. */
+var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950' };
+var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done' };
 var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club','gambling'];
 var DOMAIN_LIST = DOMAIN_LIST_FALLBACK; // overridden dynamically from briefing data
 var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
@@ -665,10 +719,39 @@ function renderBoardTab(){
 }
 
 function populateProjectSelect(){
-  var sel=document.getElementById('project-select'), mSel=document.getElementById('m-project');
-  sel.innerHTML='<option value="all">All Projects</option>'; mSel.innerHTML='';
-  allProjects.forEach(function(p){ sel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; mSel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; });
-  sel.value=currentProject;
+  var mSel=document.getElementById('m-project');
+  mSel.innerHTML='';
+  allProjects.forEach(function(p){ mSel.innerHTML+='<option value="'+p.id+'">'+esc((p.icon||'')+' '+p.name)+'</option>'; });
+  renderProjectPills();
+}
+
+/* SB-356 — the board's project filter. Each pill carries the full project name
+   in `title` as well as a short key, so the control is addressable by name for
+   assistive tech and for the test helpers.
+   Deliberate divergence from the PWA (jarvis-pwa.html:717): that bar hides
+   zero-count projects, which on the dashboard would make an empty project
+   unselectable — and the empty-project view is a real one, with its own zeroed
+   stats and placeholders. Every project gets a pill here, count included. */
+function projectShortKey(p){
+  for(var i=0;i<allItems.length;i++){
+    if(allItems[i].project_id===p.id && allItems[i].ticket_code) return allItems[i].ticket_code.split('-')[0];
+  }
+  return (p.name.replace(/[^A-Z]/g,'').substring(0,3)) || p.name.substring(0,3).toUpperCase();
+}
+
+function renderProjectPills(){
+  var cont=document.getElementById('proj-pills'); if(!cont) return;
+  var h='<button class="proj-pill'+(currentProject==='all'?' active':'')+'" data-id="all" title="All Projects">All'
+       +'<span class="pill-count">'+allItems.length+'</span></button>';
+  allProjects.forEach(function(p){
+    var cnt=allItems.filter(function(i){return i.project_id===p.id;}).length;
+    h+='<button class="proj-pill'+(currentProject===p.id?' active':'')+'" data-id="'+p.id+'" title="'+esc(p.name)+'">'
+      +esc((p.icon||'')+' '+projectShortKey(p))+'<span class="pill-count">'+cnt+'</span></button>';
+  });
+  cont.innerHTML=h;
+  cont.querySelectorAll('.proj-pill').forEach(function(pill){
+    pill.addEventListener('click',function(){ currentProject=this.dataset.id; renderProjectPills(); renderBoard(); });
+  });
 }
 function populateAgentFilter(){
   var sel=document.getElementById('agent-filter'), seen={}, opts='<option value="all">All agents</option><option value="__unassigned">Unassigned</option>';
@@ -790,16 +873,78 @@ function renderBoard(){
       var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
       var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
       var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
-      var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
+      /* SB-352 — the agent chip no longer doubles as the unassigned marker.
+         An item with a human assignee and no agent is assigned, so it must not
+         read "Unassigned"; the fallback now fires only when BOTH are absent. */
+      var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'';
+      if(!item.assignee&&!item.agent_name) agentHtml='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
       var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
-      var statusBadgeHtml=st==='on_hold'?'<span class="status-badge on-hold">ON HOLD</span>':st==='blocked'?'<span class="status-badge blocked">BLOCKED</span>':st==='escalated'?'<span class="status-badge escalated">ESCALATED</span>':'';
+      /* SB-353 — a badge for every status, not just the three exception ones.
+         Colour comes from STAT_COLORS with the background at 15% opacity (hex
+         26), matching the PWA, so the two surfaces read identically. */
+      var stColor=STAT_COLORS[st]||'#8b949e';
+      var statusBadgeHtml='<span class="status-badge" style="color:'+stColor+';background:'+stColor+'26">'
+                         +esc(STAT_NAMES[st]||st)+'</span>';
+
+      /* SB-350 — slotted card assembly. Each indicator is a named slot that
+         evaluates to '' until its own ticket fills it, so SB-351..354 can land
+         independently without three of them rewriting the same template line.
+         Order within .card-meta is the render order; keep the highest-signal
+         items first, because this row wraps at a 300px column width. */
+      /* SB-351 — ticket code leads the meta row. Omitted entirely when the item
+         has none, so no placeholder or gap is left behind (TC-202-03). */
+      var slotCode=item.ticket_code?'<span class="card-code">'+esc(item.ticket_code)+'</span>':'';
+      /* SB-354 — type badge, non-task types only. A board of tasks would gain
+         nothing from every card announcing "TASK". */
+      var slotType='';
+      if(item.type&&item.type!=='task'){
+        var tCls={bug:'type-bug',user_story:'type-story',epic:'type-epic'};
+        var tName={bug:'Bug',user_story:'Story',epic:'Epic'};
+        slotType='<span class="type-badge '+(tCls[item.type]||'')+'">'+esc(tName[item.type]||item.type)+'</span>';
+      }
+
+      /* SB-354 — attention marker. High and critical only: an unacknowledged
+         low-priority item is not news, and badging everything would make the
+         badge mean nothing. */
+      var slotNew=(item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
+                  ?'<span class="new-badge">NEW</span>':'';
+
+      /* SB-354 — subtask progress. Both counts already arrive via select=*. */
+      var slotSubtasks='';
+      if(item.child_count>0){
+        var allDone=item.completed_child_count>=item.child_count;
+        slotSubtasks='<span class="subtask-prog'+(allDone?' complete':'')+'">✓ '
+                    +item.completed_child_count+'/'+item.child_count+'</span>';
+      }
+
+      /* SB-354 — why a card might be stuck, without opening it. */
+      var slotDeps=item.blocked_by_count>0
+                   ?'<span class="dep-indicator">🔗 '+item.blocked_by_count+' dep'+(item.blocked_by_count>1?'s':'')+'</span>'
+                   :'';
+      /* SB-352 — human assignee, primary to the agent chip that follows it.
+         Shows an initials avatar plus the first name only; the full name is on
+         the title attribute, which is also how the pill/chip stays addressable. */
+      var slotAssignee='';
+      if(item.assignee){
+        var ini=item.assignee.split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase();
+        slotAssignee='<span class="assignee-chip" title="'+esc(item.assignee)+'"><span class="av">'+esc(ini)+'</span>'
+                    +esc(item.assignee.split(' ')[0])+'</span>';
+      }
+
+      var meta=[slotCode,
+                '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',
+                slotType, slotNew,
+                singleProject?'':'<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>',
+                compHtml, statusBadgeHtml];
+      var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
+      var footRight=[slotAssignee, agentHtml];
+
       html+='<div class="card" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
-      html+='<div class="card-meta"><span class="priority-dot priority-'+esc(item.priority)+'"></span>';
-      if(!singleProject) html+='<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>';
-      if(compHtml)html+=compHtml; if(statusBadgeHtml)html+=statusBadgeHtml; html+='</div>';
+      html+='<div class="card-meta">'+meta.join('')+'</div>';
       if(labels) html+='<div class="card-labels">'+labels+'</div>';
       html+='<div class="card-title">'+esc(item.title)+'</div>';
-      html+='<div class="card-footer"><div class="card-footer-left">'+dueHtml+commentHtml+'</div>'+agentHtml+'</div></div>';
+      html+='<div class="card-footer"><div class="card-footer-left">'+footLeft.join('')+'</div>'
+           +'<div class="card-footer-right">'+footRight.join('')+'</div></div></div>';
     });
     html+='<button class="add-card-btn" data-status="'+st+'">+ Add card</button>';
     col.innerHTML=html;
@@ -807,13 +952,24 @@ function renderBoard(){
   bindCardEvents();
 }
 
-/* ── Card events + drag/drop ── */
+/* ── Card events + drag/drop ──
+   bindCardEvents() runs after every renderBoard(). Only bind things that
+   renderBoard() rebuilds: .card and .add-card-btn are both regenerated from
+   innerHTML each pass, so re-adding their listeners replaces them. The .column
+   elements are static markup and must NOT be bound here — doing so stacked a
+   fresh drop handler on every render, so the Nth drop of a session fired N
+   duplicate move_work_item RPCs (SB-345). Columns are bound once, below. */
 function bindCardEvents(){
   document.querySelectorAll('.card').forEach(function(el){
     el.addEventListener('click',function(){openModal(el.dataset.id);});
     el.addEventListener('dragstart',function(e){dragItem=el.dataset.id;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
     el.addEventListener('dragend',function(){el.classList.remove('dragging');dragItem=null;document.querySelectorAll('.column').forEach(function(c){c.classList.remove('drag-over');});});
   });
+  document.querySelectorAll('.add-card-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();openNewModal(btn.dataset.status);});});
+}
+
+/* Bound exactly once at startup — the columns never get rebuilt. */
+function bindColumnEvents(){
   document.querySelectorAll('.column').forEach(function(column){
     column.addEventListener('dragover',function(e){e.preventDefault();e.dataTransfer.dropEffect='move';column.classList.add('drag-over');});
     column.addEventListener('dragleave',function(e){if(!column.contains(e.relatedTarget))column.classList.remove('drag-over');});
@@ -826,10 +982,46 @@ function bindCardEvents(){
       }catch(err){toast('Move failed: '+err.message,'error');}
     });
   });
-  document.querySelectorAll('.add-card-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();openNewModal(btn.dataset.status);});});
 }
 
 /* ── Modal ── */
+
+/* SB-355 — header identity and footer provenance, shared by both open paths.
+   Passing null resets everything, which is what the new-item path wants. */
+function setModalIdentity(item){
+  var tb=document.getElementById('m-ticket-badge'), yb=document.getElementById('m-type-badge'),
+      ts=document.getElementById('m-timestamps');
+  if(item&&item.ticket_code){ tb.textContent=item.ticket_code; tb.style.display='inline'; }
+  else tb.style.display='none';
+
+  if(item&&item.type&&item.type!=='task'){
+    var cls={bug:'modal-type-bug',user_story:'modal-type-story',epic:'modal-type-epic'};
+    var nm={bug:'Bug',user_story:'Story',epic:'Epic'};
+    yb.className='modal-type-badge '+(cls[item.type]||''); yb.textContent=nm[item.type]||item.type;
+    yb.style.display='inline';
+  } else yb.style.display='none';
+
+  if(item&&(item.created_at||item.updated_at)){
+    document.getElementById('m-created').textContent=item.created_at?'⏰ Created: '+fmtStamp(item.created_at):'';
+    document.getElementById('m-updated').textContent=item.updated_at?'✏ Updated: '+fmtStamp(item.updated_at):'';
+    ts.style.display='flex';
+  } else ts.style.display='none';
+}
+
+function fmtStamp(iso){
+  var d=new Date(iso);
+  return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+
+/* SB-355 — the status colour indicator. Reads the dropdown rather than taking a
+   status argument, so the same call serves both open paths and the change
+   listener. Deliberately NOT bound inside an open path: SB-348 is the PWA bug
+   where exactly that left the indicator stale on the edit path. */
+function syncStatusDot(){
+  var dot=document.getElementById('m-status-dot');
+  dot.style.background=STAT_COLORS[document.getElementById('m-status').value]||'#8b949e';
+}
+
 function openNewModal(status){
   editingItem=null; document.getElementById('modal-title').textContent='New Work Item';
   document.getElementById('m-title').value=''; document.getElementById('m-desc').value='';
@@ -837,6 +1029,7 @@ function openNewModal(status){
   document.getElementById('m-assignee').value=''; document.getElementById('m-due').value='';
   if(currentProject!=='all')document.getElementById('m-project').value=currentProject;
   document.getElementById('btn-delete-item').style.display='none'; document.getElementById('comments-section').style.display='none';
+  setModalIdentity(null); syncStatusDot();
   renderLabelChips([]); document.getElementById('modal-overlay').classList.add('active');
 }
 async function openModal(itemId){
@@ -847,6 +1040,7 @@ async function openModal(itemId){
   document.getElementById('m-priority').value=item.priority; document.getElementById('m-assignee').value=item.assignee||'';
   document.getElementById('m-due').value=item.due_date||''; document.getElementById('btn-delete-item').style.display='inline-flex';
   renderLabelChips((item.labels||[]).map(function(l){return l.id;}));
+  setModalIdentity(item); syncStatusDot();
   document.getElementById('comments-section').style.display='block'; await loadComments(itemId);
   document.getElementById('modal-overlay').classList.add('active');
 }
@@ -876,7 +1070,10 @@ document.getElementById('btn-save-modal').addEventListener('click',async functio
     else{data.sort_order=allItems.filter(function(i){return i.status===data.status;}).length; var res=await fetch(SUPABASE_URL+'/rest/v1/work_items',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw new Error('Create failed'); var rows=await res.json(); itemId=rows[0].id;}
     await fetch(SUPABASE_URL+'/rest/v1/work_item_labels?work_item_id=eq.'+itemId,{method:'DELETE',headers:h});
     if(selectedLabels.length){var lr=selectedLabels.map(function(lid){return{work_item_id:itemId,label_id:lid};}); await fetch(SUPABASE_URL+'/rest/v1/work_item_labels',{method:'POST',headers:h,body:JSON.stringify(lr)});}
-    closeModal(); toast(editingItem?'Updated':'Created','success'); await loadAll();
+    // Capture the mode first: closeModal() nulls editingItem, so reading it
+    // afterwards always reported a create, even on an edit (SB-344).
+    var wasEdit=!!editingItem;
+    closeModal(); toast(wasEdit?'Updated':'Created','success'); await loadAll();
   }catch(err){toast('Save error: '+err.message,'error');}
 });
 document.getElementById('btn-delete-item').addEventListener('click',async function(){
@@ -891,7 +1088,12 @@ document.getElementById('modal-overlay').addEventListener('click',function(e){if
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
 
 /* ── Board filter events ── */
-document.getElementById('project-select').addEventListener('change',function(){currentProject=this.value;renderBoard();});
+/* SB-356 — pill clicks are bound in renderProjectPills(), which rebuilds them
+   on every render; no static listener to attach here. */
+/* SB-355 — bound once, at startup. #m-status is static markup, so this is the
+   only binding either open path needs; see SB-348 for what per-path binding
+   costs. */
+document.getElementById('m-status').addEventListener('change', syncStatusDot);
 /* ── Per-project dev-automation toggle (ADR-GOV-001) ── */
 function renderProjAutoToggle(){
   var wrap=document.getElementById('proj-auto-wrap'), btn=document.getElementById('proj-auto-tgl'), hint=document.getElementById('proj-auto-hint');
@@ -941,6 +1143,7 @@ function routeFromHash(){
 }
 window.addEventListener('hashchange',routeFromHash);
 routeFromHash();
+bindColumnEvents();
 checkSession();
 </script>
 </body>

@@ -1027,7 +1027,10 @@ document.getElementById('btn-save').addEventListener('click',async function(){
     else{data.sort_order=items.filter(function(i){return i.status===data.status;}).length;var r=await fetch(SB_URL+'/rest/v1/work_items',{method:'POST',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)});if(!r.ok)throw new Error('Create failed');var rows=await r.json();itemId=rows[0].id;}
     await fetch(SB_URL+'/rest/v1/work_item_labels?work_item_id=eq.'+itemId,{method:'DELETE',headers:h});
     if(selLbls.length){var lr=selLbls.map(function(lid){return{work_item_id:itemId,label_id:lid};});await fetch(SB_URL+'/rest/v1/work_item_labels',{method:'POST',headers:h,body:JSON.stringify(lr)});}
-    closeModal();toast(editItem?'Updated':'Created');await loadAll();
+    // Capture the mode first: closeModal() nulls editItem, so reading it
+    // afterwards always reported a create, even on an edit (SB-344).
+    var wasEdit=!!editItem;
+    closeModal();toast(wasEdit?'Updated':'Created');await loadAll();
   }catch(e){toast('Save error: '+e.message,'error');}
 });
 document.getElementById('btn-del').addEventListener('click',async function(){
