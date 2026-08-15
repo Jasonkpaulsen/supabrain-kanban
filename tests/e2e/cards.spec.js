@@ -389,10 +389,20 @@ test.describe('@cards SB-206', () => {
       .toBe(STAT_COLORS.blocked);
     await page.click('#m-close');
 
+    // Dashboard half. Step 5 — "verify the color indicator updates immediately"
+    // — has to be asserted here too, not just on the PWA. Checking only that the
+    // element exists would pass against a modal whose indicator never updates,
+    // which is precisely the defect SB-348 was; a QA-gate mutation check caught
+    // this assertion being too weak to notice the handler being unbound.
     const page2 = await dashPage(browser, opts);
     await dashCard(page2, 'Human assignee card').click();
-    await expect(page2.locator('#m-status-dot'),
-      'dashboard modal has no status colour indicator').toHaveCount(1);
+    const dashDot = page2.locator('#m-status-dot');
+    await expect(dashDot, 'dashboard modal has no status colour indicator').toBeVisible();
+    expect(await dashDot.evaluate((e) => getComputedStyle(e).backgroundColor),
+      'dashboard indicator does not reflect the current status').toBe(STAT_COLORS.todo);
+    await page2.selectOption('#m-status', 'blocked');
+    expect(await dashDot.evaluate((e) => getComputedStyle(e).backgroundColor),
+      'dashboard indicator did not update when the status changed').toBe(STAT_COLORS.blocked);
   });
 
   test('TC-206-04 created and updated timestamps shown in modal footer', async ({ page, browser }) => {
