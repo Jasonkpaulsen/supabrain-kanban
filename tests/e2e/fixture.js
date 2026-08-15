@@ -18,7 +18,10 @@ const FIXTURE = {
     blocked: 0, review: 5, escalated: 0, done: 10,
   },
   donePct: 40,
-  inFlight: 10,          // todo + in_progress + review
+  // todo + in_progress + review + escalated, matching renderBoardStats. The
+  // fixture carries no escalated items, so the escalated term contributes 0
+  // here — TC-01 rev 1 omitted it and passed by coincidence (SB-342).
+  inFlight: 10,
   unassigned: 6,         // includes the 2 epics, which carry no agent
   segments: { done: '40%', review: '20%', prog: '12%' },
   domains: { products: 13, operations: 12 },
@@ -41,13 +44,17 @@ const FIXTURE = {
   domainStripe: { products: 'rgb(139, 92, 246)', operations: 'rgb(247, 120, 186)' },
 };
 
-// The five columns TC-09 names, in the order it expects them, with the header
-// colours defined in the stylesheet.
+// The eight columns TC-09 names at rev 2, in order, with the header colours
+// defined in the stylesheet. Rev 1 listed only five; on_hold, blocked and
+// escalated were added to the board and the case was reconciled under SB-342.
 const SPEC_COLUMNS = [
   { status: 'backlog', title: 'Backlog', color: 'rgb(139, 148, 158)' },
   { status: 'todo', title: 'To Do', color: 'rgb(88, 166, 255)' },
   { status: 'in_progress', title: 'In Progress', color: 'rgb(139, 92, 246)' },
+  { status: 'on_hold', title: 'On Hold', color: 'rgb(163, 113, 247)' },
+  { status: 'blocked', title: 'Blocked', color: 'rgb(248, 81, 73)' },
   { status: 'review', title: 'Review', color: 'rgb(210, 153, 34)' },
+  { status: 'escalated', title: 'Escalated', color: 'rgb(240, 136, 62)' },
   { status: 'done', title: 'Done', color: 'rgb(63, 185, 80)' },
 ];
 

@@ -352,13 +352,13 @@ test.describe('@batch2 SB-340', () => {
   test.skip('TC-SB116 auth session sharing with the JARVIS dashboard', () => {});
 
   // ── TC-19 ──────────────────────────────────────────────────────────────
-  test('TC-SB119 board tab integrates into the JARVIS dashboard', async ({ page }) => {
+  test('TC-SB119 Board tab integrates into the JARVIS dashboard', async ({ page }) => {
     const errors = await login(page, { skipBoard: true });
 
-    // Step 2: the board tab is present in the dashboard nav.
+    // Step 2: the Board tab is present in the dashboard nav.
     const tab = page.locator('.g-tab[data-tab="board"]');
     await expect(tab).toBeVisible();
-    const tabLabel = (await tab.textContent()).trim();
+    await expect(tab).toHaveText('Board');
 
     // Step 6: the shared dark theme.
     const bg = await page.evaluate(() =>
@@ -373,6 +373,7 @@ test.describe('@batch2 SB-340', () => {
 
     // Step 4: the hash tracks the active tab.
     const hash = await page.evaluate(() => window.location.hash);
+    expect(hash).toBe('#board');
 
     // Step 7: the board header carries no second brand/login — the shell owns them.
     expect(await page.locator('#panel-board .brand').count()).toBe(0);
@@ -391,10 +392,5 @@ test.describe('@batch2 SB-340', () => {
     await expect(page.locator('.g-tab[data-tab="board"]')).toHaveClass(/active/);
 
     expect(errors).toEqual([]);
-
-    // The case names a "Kanban" tab at #kanban; the app ships "Board" at #board.
-    // Asserted last so the substantive integration checks above are all recorded
-    // before this trips.
-    expect({ label: tabLabel, hash }).toEqual({ label: 'Kanban', hash: '#kanban' });
   });
 });

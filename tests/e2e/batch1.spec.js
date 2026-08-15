@@ -266,10 +266,10 @@ test('@batch1 TC-SB108 cards render all 5 visual layers correctly', async ({ pag
 });
 
 /* ────────────────────────── TC-SB109-V1 — columns ──────────────────────────── */
-test('@batch1 TC-SB109 5 columns render with correct colors and counts', async ({ page }) => {
+test('@batch1 TC-SB109 8 columns render with correct colors and counts', async ({ page }) => {
   const columns = page.locator('.column');
 
-  // Steps 2-3: the five named columns render, in order, with the specified
+  // Steps 2-3: the eight named columns render, in order, with the specified
   // header colours and count badges.
   for (const col of SPEC_COLUMNS) {
     const el = page.locator(`.column[data-status="${col.status}"]`);
@@ -280,8 +280,7 @@ test('@batch1 TC-SB109 5 columns render with correct colors and counts', async (
   }
 
   const order = await columns.evaluateAll((els) => els.map((e) => e.dataset.status));
-  const specOrder = SPEC_COLUMNS.map((c) => c.status);
-  expect(order.filter((s) => specOrder.includes(s))).toEqual(specOrder);
+  expect(order).toEqual(SPEC_COLUMNS.map((c) => c.status));
 
   // Step 4: columns with no items show the "—" placeholder.
   for (const status of ['on_hold', 'blocked', 'escalated']) {
@@ -314,7 +313,6 @@ test('@batch1 TC-SB109 5 columns render with correct colors and counts', async (
   await page.locator('#modal-close').click();
   await expect(page.locator('#modal-overlay')).not.toHaveClass(/active/);
 
-  // Step 2 (literal): the test case names five columns, but the board ships
-  // eight. Asserted last so the preceding coverage is recorded either way.
-  await expect(columns, 'test case specifies 5 columns; board renders 8').toHaveCount(5);
+  // Step 1: the board carries all eight work_item statuses (rev 2, SB-342).
+  await expect(columns).toHaveCount(SPEC_COLUMNS.length);
 });
