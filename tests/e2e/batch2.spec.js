@@ -384,13 +384,27 @@ test.describe('@batch2 SB-340', () => {
     });
     expect(token2, 'second tab holds a different token').toBe(session.access_token);
 
-    // Step 4: RLS scopes the board to the signed-in user. Every row the board
-    // renders must belong to a project this user owns — asserted by counting
-    // against the fixture totals rather than trusting the UI's own filtering.
-    const total = Number(await page.locator('#s-total').textContent());
-    expect(total, 'signed-in user sees no rows — is the fixture board archived?')
+    // Step 4: RLS scopes what this user can reach. Assert the PROPERTY — every
+    // row the authenticated client can see belongs to the signed-in user — not
+    // a row count. An earlier draft asserted `total === FIXTURE.total`, which
+    // tested how many fixture rows happened to be un-archived rather than
+    // testing RLS at all, and coupled this auth case to unrelated fixture
+    // housekeeping. The query below deliberately omits any archived filter, so
+    // it holds whether or not the fixture board is archived.
+    const scoping = await page.evaluate(async () => {
+      const k = Object.keys(localStorage).find((x) => x.startsWith('sb-') && x.includes('auth-token'));
+      const sess = JSON.parse(localStorage.getItem(k));
+      const res = await fetch(
+        window.SUPABASE_URL + '/rest/v1/work_items?select=user_id&limit=2000',
+        { headers: { apikey: window.SUPABASE_KEY, Authorization: 'Bearer ' + sess.access_token } }
+      );
+      const rows = await res.json();
+      return { me: sess.user.id, owners: [...new Set(rows.map((r) => r.user_id))], n: rows.length };
+    });
+    expect(scoping.n, 'RLS returned nothing at all — cannot prove scoping from an empty set')
       .toBeGreaterThan(0);
-    expect(total).toBe(FIXTURE.total);
+    expect(scoping.owners, 'rows belonging to another user are reachable')
+      .toEqual([scoping.me]);
 
     // Step 5: sign out in tab 1 propagates. Supabase broadcasts SIGNED_OUT
     // across tabs in the same origin, so tab 2 must lose its session too.
