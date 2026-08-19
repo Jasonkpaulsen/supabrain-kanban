@@ -53,11 +53,22 @@ function rowsFor(url, payload) {
 }
 
 // `payload` defaults to the baseline board; TC-SB118 swaps in the bulk variant.
+// E2E_LIVE=1 drives the real backend instead of the replay. Until this was
+// wired up the flag existed only as a sentence in tests/README.md — setting it
+// changed nothing, which made "run it live" look like a one-command job when
+// there was no mechanism behind it.
+const LIVE = process.env.E2E_LIVE === '1';
+
 async function installStubs(page, payload = PAYLOAD) {
-  // Vendored supabase-js in place of the blocked CDN.
+  // The vendored supabase-js bundle is served in BOTH modes. Live mode is about
+  // exercising the real Supabase backend, not the real CDN; serving the library
+  // locally keeps the test from also depending on cdn.jsdelivr.net egress.
   await page.route('**/cdn.jsdelivr.net/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/javascript', path: SUPABASE_UMD })
   );
+
+  // Live mode stops here: auth and REST go to the real origin.
+  if (LIVE) return;
 
   await page.route('**/auth/v1/**', (route) => {
     const url = route.request().url();
@@ -77,4 +88,4 @@ async function installStubs(page, payload = PAYLOAD) {
   });
 }
 
-module.exports = { installStubs, PAYLOAD, SESSION };
+module.exports = { installStubs, PAYLOAD, SESSION, LIVE };

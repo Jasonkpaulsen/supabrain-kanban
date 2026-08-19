@@ -6,7 +6,7 @@ const {
   FIXTURE, login, openBoard, selectProject, selectAllProjects, cardByTitle,
 } = require('./fixture');
 const { withBulk, BULK_TOTALS, EDGE } = require('./fixtures/bulk');
-const { PAYLOAD } = require('./stub');
+const { PAYLOAD, LIVE, installStubs } = require('./stub');
 
 const ALL_STATUSES = ['backlog', 'todo', 'in_progress', 'on_hold', 'blocked', 'review', 'escalated', 'done'];
 
@@ -349,7 +349,79 @@ test.describe('@batch2 SB-340', () => {
   // session object is something this suite fabricates, so "verifying" any of
   // that would only be asserting that the stub returns what the stub was told
   // to return. Recorded as blocked, not passed — see TC-SB116-V1 in test_cases.
-  test.skip('TC-SB116 auth session sharing with the JARVIS dashboard', () => {});
+  // ── TC-16 ──────────────────────────────────────────────────────────────
+  // Every assertion here concerns the REAL Supabase auth session: one token
+  // shared across tabs, sign-out propagating, RLS scoping to the signed-in
+  // user, and an expired token degrading gracefully. Under the stub the session
+  // is fabricated, so asserting on it would only prove the stub returns what the
+  // stub was told to return — which is why this ran as an empty test.skip() for
+  // so long. The body below is real; it is gated on E2E_LIVE so it SKIPS rather
+  // than passes vacuously when the backend is not reachable.
+  test('TC-SB116 auth session sharing with the JARVIS dashboard', async ({ page, context }) => {
+    test.skip(!LIVE, 'needs E2E_LIVE=1, egress to *.supabase.co, and real fixture credentials');
+
+    const errors = await login(page);
+
+    // Step 1-2: the session is a real one, not a fabricated object.
+    const session = await page.evaluate(() => {
+      const k = Object.keys(localStorage).find((x) => x.startsWith('sb-') && x.includes('auth-token'));
+      return k ? JSON.parse(localStorage.getItem(k)) : null;
+    });
+    expect(session, 'no supabase session in localStorage').toBeTruthy();
+    expect(session.access_token, 'access token is not a JWT').toMatch(/^ey[\w-]+\.[\w-]+\./);
+    expect(session.user.email).toBe(process.env.QA_FIXTURE_EMAIL);
+    expect(session.expires_at * 1000).toBeGreaterThan(Date.now());
+
+    // Step 3: a second tab in the same context inherits the token without a
+    // second login, and sees the same board.
+    const tab2 = await context.newPage();
+    await tab2.goto('/jarvis-dashboard.html');
+    await expect(tab2.locator('#login-overlay')).toHaveClass(/hidden/, { timeout: 20000 });
+    await openBoard(tab2);
+    const token2 = await tab2.evaluate(() => {
+      const k = Object.keys(localStorage).find((x) => x.startsWith('sb-') && x.includes('auth-token'));
+      return k ? JSON.parse(localStorage.getItem(k)).access_token : null;
+    });
+    expect(token2, 'second tab holds a different token').toBe(session.access_token);
+
+    // Step 4: RLS scopes the board to the signed-in user. Every row the board
+    // renders must belong to a project this user owns — asserted by counting
+    // against the fixture totals rather than trusting the UI's own filtering.
+    const total = Number(await page.locator('#s-total').textContent());
+    expect(total, 'signed-in user sees no rows — is the fixture board archived?')
+      .toBeGreaterThan(0);
+    expect(total).toBe(FIXTURE.total);
+
+    // Step 5: sign out in tab 1 propagates. Supabase broadcasts SIGNED_OUT
+    // across tabs in the same origin, so tab 2 must lose its session too.
+    await page.click('#btn-logout');
+    await expect(page.locator('#login-overlay')).not.toHaveClass(/hidden/);
+    await expect
+      .poll(async () => tab2.evaluate(() => {
+        const k = Object.keys(localStorage).find((x) => x.startsWith('sb-') && x.includes('auth-token'));
+        return k ? 'present' : 'gone';
+      }), { timeout: 15000, message: 'sign-out did not propagate to the second tab' })
+      .toBe('gone');
+    await tab2.close();
+
+    // Step 6: an expired token degrades gracefully — the app must show the
+    // login overlay, not crash or render a half-authenticated board.
+    const page3 = await context.newPage();
+    await installStubs(page3);            // live mode: serves the JS bundle only
+    await page3.goto('/jarvis-dashboard.html');
+    await page3.evaluate(() => {
+      localStorage.setItem('sb-expired-probe-auth-token', JSON.stringify({
+        access_token: 'expired.invalid.token',
+        expires_at: Math.floor(Date.now() / 1000) - 3600,
+        user: { id: '00000000-0000-0000-0000-000000000000', email: 'expired@example.test' },
+      }));
+    });
+    await page3.reload();
+    await expect(page3.locator('#login-overlay')).not.toHaveClass(/hidden/);
+    await page3.close();
+
+    expect(errors).toEqual([]);
+  });
 
   // ── TC-19 ──────────────────────────────────────────────────────────────
   test('TC-SB119 Board tab integrates into the JARVIS dashboard', async ({ page }) => {

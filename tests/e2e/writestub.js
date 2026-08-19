@@ -72,6 +72,14 @@ function createBackend(seed = BASE) {
 
 async function installWriteStubs(page, seed) {
   const backend = createBackend(seed);
+  // Live mode: batch 3 mutates, so it must NOT be pointed at the real project
+  // by accident. Refuse loudly rather than writing to production data.
+  if (process.env.E2E_LIVE === '1') {
+    throw new Error(
+      'installWriteStubs called with E2E_LIVE=1. Batch 3 performs writes and has ' +
+      'no live-safe mode; run it against the stub, or seed a scratch project first.'
+    );
+  }
   const { state, relabel, newItem } = backend;
 
   const json = (route, body, status = 200) =>
