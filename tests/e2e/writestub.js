@@ -20,7 +20,7 @@ const BASE = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'fixtures', 'board-payload.json'), 'utf8')
 );
 const SUPABASE_UMD = require.resolve('@supabase/supabase-js/dist/umd/supabase.js');
-const { SESSION } = require('./stub');
+const { SESSION, applyArchivedFilter } = require('./stub');
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const idFromEq = (url, param) => {
@@ -189,7 +189,12 @@ async function installWriteStubs(page, seed) {
     if (url.includes('/rest/v1/projects')) return json(route, state.projects);
     if (url.includes('/rest/v1/labels')) return json(route, state.labels);
     if (url.includes('/rest/v1/agents')) return json(route, state.agents);
-    if (url.includes('/rest/v1/kanban_board_view')) return json(route, state.items);
+    // SB-314: the same archived filter the read stub applies. The two stubs
+    // serve the same fixture, so a row this one forgets to filter shows up on
+    // every write-capable board and quietly inflates the seeded counts.
+    if (url.includes('/rest/v1/kanban_board_view')) {
+      return json(route, applyArchivedFilter(url, state.items));
+    }
     return json(route, []);
   });
 
