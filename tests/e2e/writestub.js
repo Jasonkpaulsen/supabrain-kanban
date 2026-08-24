@@ -20,7 +20,7 @@ const BASE = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'fixtures', 'board-payload.json'), 'utf8')
 );
 const SUPABASE_UMD = require.resolve('@supabase/supabase-js/dist/umd/supabase.js');
-const { SESSION } = require('./stub');
+const { SESSION, applyArchivedFilter } = require('./stub');
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const idFromEq = (url, param) => {
@@ -72,6 +72,14 @@ function createBackend(seed = BASE) {
 
 async function installWriteStubs(page, seed) {
   const backend = createBackend(seed);
+  // Live mode: batch 3 mutates, so it must NOT be pointed at the real project
+  // by accident. Refuse loudly rather than writing to production data.
+  if (process.env.E2E_LIVE === '1') {
+    throw new Error(
+      'installWriteStubs called with E2E_LIVE=1. Batch 3 performs writes and has ' +
+      'no live-safe mode; run it against the stub, or seed a scratch project first.'
+    );
+  }
   const { state, relabel, newItem } = backend;
 
   const json = (route, body, status = 200) =>
@@ -181,7 +189,12 @@ async function installWriteStubs(page, seed) {
     if (url.includes('/rest/v1/projects')) return json(route, state.projects);
     if (url.includes('/rest/v1/labels')) return json(route, state.labels);
     if (url.includes('/rest/v1/agents')) return json(route, state.agents);
-    if (url.includes('/rest/v1/kanban_board_view')) return json(route, state.items);
+    // SB-314: the same archived filter the read stub applies. The two stubs
+    // serve the same fixture, so a row this one forgets to filter shows up on
+    // every write-capable board and quietly inflates the seeded counts.
+    if (url.includes('/rest/v1/kanban_board_view')) {
+      return json(route, applyArchivedFilter(url, state.items));
+    }
     return json(route, []);
   });
 

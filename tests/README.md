@@ -44,8 +44,22 @@ This exists because CI runners without outbound network access cannot reach
 exercised in a real browser, but **the live HTTP round trip is not** — that is
 covered by TC-SB116 and TC-SB119 in batch 2, which require real egress.
 
-Set `E2E_LIVE=1` to skip the stub and drive the real backend. Run the suite that
-way at least once before signing off a batch.
+Set `E2E_LIVE=1` to skip the stub and drive the real backend. It is wired up in
+`stub.js`: live mode still serves the vendored supabase-js bundle (live mode is
+about the real backend, not the real CDN) but stops intercepting `/auth/v1/**`
+and `/rest/v1/**`.
+
+Live mode needs three things that the sandboxed runner does not have:
+
+1. egress to `*.supabase.co` — the agent proxy answers 403 to CONNECT by default;
+2. `QA_FIXTURE_EMAIL` and `QA_FIXTURE_PASSWORD` for a fixture user that can
+   actually sign in;
+3. the fixture projects un-archived, or the board renders empty and TC-SB116's
+   RLS assertion has nothing to check:
+   `update public.projects set archived = false where meta->>'qa_fixture' = 'true';`
+
+`installWriteStubs` (batch 3) throws under `E2E_LIVE=1` on purpose — that batch
+mutates and has no live-safe mode.
 
 ## Where results go
 
