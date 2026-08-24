@@ -198,6 +198,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .chip { font-size: 12px; font-weight: 500; padding: 5px 11px; border-radius: 20px; cursor: pointer; border: 1px solid var(--card-border); color: var(--text-muted); background: var(--bg); transition: all 0.12s; display: inline-flex; align-items: center; gap: 6px; user-select: none; }
 .chip:hover { border-color: var(--card-hover-border); color: var(--text); }
 .chip.active { color: #fff; border-color: transparent; }
+/* SB-314 — .chip.active supplies white text but NO background; the status and
+   domain chips each carry their own inline background, so a chip without one
+   turns white-on-background and disappears when active. The Archived chip is
+   standalone, so it needs its own active fill. */
+#archived-chips .chip.active { background: var(--accent-blue); border-color: var(--accent-blue); }
 .chip .dot { width: 8px; height: 8px; border-radius: 2px; }
 .filter-select { background: var(--bg); border: 1px solid var(--card-border); color: var(--text); padding: 6px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; outline: none; }
 .filter-spacer { flex: 1; }
@@ -243,6 +248,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
    `margin-left:auto` push on the status badge as the PWA does: at this
    width a right-pushed badge leaves a ragged hole on the wrap line. */
 .card-code { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-dim); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+/* SB-314 / ADR-FLOW-003 — an archived card, when revealed, reads as settled
+   history rather than live work. Dimmed, not hidden: it is still draggable and
+   openable, because restoring one is done by moving it. */
+.card.archived { opacity: .55; }
+.card-arch { font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-dim); font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; }
 .type-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
 .type-badge.type-bug { color: #fca5a5; background: rgba(248,81,73,0.16); }
 .type-badge.type-story { color: #a5c8ff; background: rgba(88,166,255,0.16); }
@@ -401,6 +411,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div class="filter-bar">
       <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span></div>
       <div class="filter-group" id="domain-chips"><span class="grp-label">Domain</span><span class="chip active" data-domain="all" style="background:var(--card-bg)">All</span></div>
+      <div class="filter-group" id="archived-chips"><span class="grp-label">Archived</span><span class="chip" id="chip-archived">Show archived</span></div>
       <select class="filter-select" id="priority-filter"><option value="all">All priorities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
       <select class="filter-select" id="agent-filter"><option value="all">All agents</option><option value="__unassigned">Unassigned</option></select>
       <select class="filter-select" id="label-filter"><option value="all">All labels</option></select>
@@ -463,6 +474,12 @@ var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
 var allItems=[], allProjects=[], allLabels=[], allAgents=[], agentsById={}, projectDomain={};
 var currentProject='all', searchQuery='', priorityFilter='all', domainFilter='all', agentFilter='all';
 var statusFilter='all', labelFilter='all', flagFilter='all';
+/* SB-314 / ADR-FLOW-003 — archived items are hidden by default and revealed by
+   the Archived chip. This is fetch-level state, not a client-side filter: the
+   rows are excluded by the PostgREST query, so toggling it has to re-fetch.
+   Keeping it out of filterItems() is deliberate — it keeps the default payload
+   small (720 of ~1,100 work items are archived). */
+var showArchived=false;
 var editingItem=null, dragItem=null;
 var briefingData=null, jobLeads=[], attentionItems=[];
 
@@ -511,7 +528,10 @@ async function loadAll(){
     var [pRes,lRes,iRes,aRes,bRes,jRes] = await Promise.all([
       fetch(SUPABASE_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
-      fetch(SUPABASE_URL+'/rest/v1/kanban_board_view?select=*&archived=eq.false&order=sort_order',{headers:h}),
+      /* SB-314 — the archived filter is dropped, not inverted, when the chip is
+         on: showing archived means showing everything, so archived cards appear
+         in place alongside live ones rather than in a separate list. */
+      fetch(SUPABASE_URL+'/rest/v1/kanban_board_view?select=*'+(showArchived?'':'&archived=eq.false')+'&order=sort_order',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/jarvis_briefings?select=*&order=briefing_date.desc&limit=1',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score,match_quality,url&decision=eq.review&order=score.desc&limit=5',{headers:h})
@@ -931,15 +951,20 @@ function renderBoard(){
                     +esc(item.assignee.split(' ')[0])+'</span>';
       }
 
+      /* SB-314 — archived marker. Only reachable when the Archived chip is on,
+         since the rows are otherwise excluded at fetch. Placed last in the meta
+         row: it describes the record's lifecycle, not the work. */
+      var slotArch=item.archived?'<span class="card-arch">Archived</span>':'';
+
       var meta=[slotCode,
                 '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',
                 slotType, slotNew,
                 singleProject?'':'<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>',
-                compHtml, statusBadgeHtml];
+                compHtml, statusBadgeHtml, slotArch];
       var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
       var footRight=[slotAssignee, agentHtml];
 
-      html+='<div class="card" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
+      html+='<div class="card'+(item.archived?' archived':'')+'" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
       html+='<div class="card-meta">'+meta.join('')+'</div>';
       if(labels) html+='<div class="card-labels">'+labels+'</div>';
       html+='<div class="card-title">'+esc(item.title)+'</div>';
@@ -1188,7 +1213,22 @@ document.getElementById('label-filter').addEventListener('change',function(){lab
 document.getElementById('flag-filter').addEventListener('change',function(){flagFilter=this.value;renderBoard();});
 document.getElementById('status-chips').addEventListener('click',function(e){var chip=e.target.closest('.chip');if(!chip)return;statusFilter=chip.dataset.status;this.querySelectorAll('.chip').forEach(function(c){c.classList.toggle('active',c===chip);});renderBoard();});
 document.getElementById('domain-chips').addEventListener('click',function(e){var chip=e.target.closest('.chip');if(!chip||!chip.dataset.domain)return;domainFilter=chip.dataset.domain;this.querySelectorAll('.chip').forEach(function(c){c.classList.toggle('active',c===chip);});renderBoard();});
-document.getElementById('filter-clear').addEventListener('click',function(){statusFilter='all';domainFilter='all';agentFilter='all';priorityFilter='all';labelFilter='all';flagFilter='all';searchQuery='';document.getElementById('agent-filter').value='all';document.getElementById('priority-filter').value='all';document.getElementById('label-filter').value='all';document.getElementById('flag-filter').value='all';document.getElementById('search-input').value='';document.querySelectorAll('#status-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.status==='all');});document.querySelectorAll('#domain-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.domain==='all');});renderBoard();});
+document.getElementById('filter-clear').addEventListener('click',function(){statusFilter='all';domainFilter='all';agentFilter='all';priorityFilter='all';labelFilter='all';flagFilter='all';searchQuery='';document.getElementById('agent-filter').value='all';document.getElementById('priority-filter').value='all';document.getElementById('label-filter').value='all';document.getElementById('flag-filter').value='all';document.getElementById('search-input').value='';document.querySelectorAll('#status-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.status==='all');});document.querySelectorAll('#domain-chips .chip').forEach(function(c){c.classList.toggle('active',c.dataset.domain==='all');});
+  /* SB-314 — Clear resets the archived reveal too, but only reloads when it was
+     actually on. Every other filter here is client-side; this one is not, so an
+     unconditional loadAll() would turn Clear into a full refetch on every press. */
+  if(showArchived){showArchived=false;var ac=document.getElementById('chip-archived');ac.classList.remove('active');ac.textContent='Show archived';loadAll();return;}
+  renderBoard();});
+
+/* SB-314 / ADR-FLOW-003 — the Archived chip re-fetches with the archived filter
+   dropped. It cannot be a client-side toggle: archived rows are excluded by the
+   PostgREST query, so they are not in memory to reveal. */
+document.getElementById('chip-archived').addEventListener('click',function(){
+  showArchived=!showArchived;
+  this.classList.toggle('active',showArchived);
+  this.textContent=showArchived?'Hiding nothing':'Show archived';
+  loadAll();
+});
 document.getElementById('btn-new').addEventListener('click',function(){openNewModal('backlog');});
 document.getElementById('btn-refresh').addEventListener('click',loadAll);
 document.getElementById('btn-util').addEventListener('click',function(){var panel=document.getElementById('util-panel');var open=panel.classList.toggle('open');this.classList.toggle('active',open);if(open){panel.addEventListener('transitionend',function h(){fixUtilScroll();panel.removeEventListener('transitionend',h);});}else{var w=document.getElementById('util-scroll-wrap');if(w)w.style.maxHeight='0';}});
