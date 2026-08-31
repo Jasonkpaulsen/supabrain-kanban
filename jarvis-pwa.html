@@ -184,6 +184,8 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 /* ADR-FLOW-003: archived cards render read-only-looking when revealed */
 .card.archived{opacity:.55;}
 .card-arch{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 5px;border-radius:4px;background:var(--sf);border:1px solid var(--card-b);color:var(--tx-m);font-family:'SF Mono',monospace;}
+.card-hold{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 5px;border-radius:4px;background:var(--sf);border:1px solid var(--card-b);color:var(--tx-m);font-family:'SF Mono',monospace;cursor:help;}
+.card-hold-gate{border-color:#b8860b;color:#b8860b;}
 .pri-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .pri-critical{background:var(--red);} .pri-high{background:var(--orange);} .pri-medium{background:var(--blue);} .pri-low{background:var(--tx-m);}
 .card-labels{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px;}
@@ -877,6 +879,9 @@ h+='<div class="card'+(it.archived?' archived':'')+'" data-id="'+it.id+'"><span 
 if(it.ticket_code)h+='<span class="card-code">'+esc(it.ticket_code)+'</span>';
 /* ADR-FLOW-003: archived badge */
 if(it.archived)h+='<span class="card-arch">Archived</span>';
+/* SB-394: why is this on hold? A gate redirect and a person's decision look
+   identical on the board otherwise, so on_hold reads as a choice nobody made. */
+if(it.status==='on_hold'){if(it.held_by_gate)h+='<span class="card-hold card-hold-gate" title="Parked automatically by '+esc(it.held_by_gate)+'">Auto-held</span>';else if(it.hold_reason)h+='<span class="card-hold" title="'+esc(it.hold_reason)+'">Held</span>';}
 h+='<span class="pri-dot pri-'+esc(it.priority)+'"></span>';
 /* SB-207: Type badge for non-task types */
 if(it.type&&it.type!=='task'){var _tc={bug:'type-bug',user_story:'type-story',epic:'type-epic'};var _tn={bug:'Bug',user_story:'Story',epic:'Epic'};h+='<span class="type-badge '+(_tc[it.type]||'')+'">'+esc(_tn[it.type]||it.type)+'</span>';}
