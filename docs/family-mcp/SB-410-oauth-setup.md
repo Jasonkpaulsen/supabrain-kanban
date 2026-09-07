@@ -15,24 +15,40 @@ Ticket SB-410 · Epic SB-406 · ADR-API-002 · Connection row `public.external_c
 
 ## What Jason does in the Supabase dashboard (project `hzqqvbvhnzmgqivfigej`)
 
-1. **Authentication → OAuth Server → Enable.** Set the *authorization path* to the consent page on
-   the existing HTTPS app origin, e.g. `https://jasonkpaulsen.github.io/supabrain-kanban/oauth-consent.html`
-   (adjust if the Pages origin differs). Leave **Dynamic Client Registration off**.
-2. **Authentication → JWT → Signing keys:** use an asymmetric key (ES256 or RS256) so the Edge
-   Function can verify tokens against the JWKS endpoint without a shared secret.
-3. **OAuth Server → Clients → Register:** name `Mandy — Codex Family Data MCP (v1)`, type **public**
-   (PKCE), redirect URI = the exact URL from Mandy. Copy the generated `client_id`.
-4. Store it on the connection (SQL editor, as the owner):
+None of these are reachable from the Supabase MCP toolset an agent has (database, Edge Functions,
+advisors, docs, logs, branches) — Auth configuration has no tool surface there, so a human does them
+in the console. Client registration *is* available through the auth admin API, but only with the
+service-role key, which ADR-API-002 keeps off every non-platform surface; the dashboard is the
+correct path.
+
+1. **Authentication → URL Configuration.** Note the current **Site URL**. The authorization path in
+   step 3 is *appended to Site URL* — it is a path, not a full URL. If Site URL is already the Pages
+   origin (`https://jasonkpaulsen.github.io/supabrain-kanban`), nothing to change. If it is something
+   else, changing it also changes where password-reset and magic-link emails send people for the
+   existing dashboards, so check that before editing it.
+2. **Authentication → Signing Keys:** migrate to an asymmetric key (ES256 or RS256). Default is HS256,
+   which works for the code flow but cannot be validated by third parties against the JWKS endpoint,
+   and ID tokens (the `openid` scope) fail outright under HS256.
+3. **Authentication → OAuth Server → Enable**, then set **Authorization Path** to `/oauth-consent.html`
+   (combined with Site URL this must resolve to the live consent page — merge PR #9 first and load the
+   URL in a browser to confirm). Leave **dynamic client registration OFF**: it would let any MCP client
+   register itself against this project.
+4. **Authentication → OAuth Server → Clients → Register:** name `Mandy — Codex Family Data MCP (v1)`,
+   client type **public** (token endpoint auth method `none`, PKCE), redirect URI = the exact URL from
+   Mandy. Redirect URIs require an exact full-URL match — no wildcards, no partial paths. Copy the
+   generated **Client ID**.
+5. Hand the Client ID to the Platform Engineer, who writes it onto the connection row:
    ```sql
    update public.external_connections
-      set oauth_client_id = '<client_id from step 3>', status = 'active'
+      set oauth_client_id = '<client_id>', status = 'active'
     where id = 'c0de0000-0000-4000-a000-000000000408';
    ```
    The `active` state is refused by a CHECK constraint until both `principal_user_id` and
-   `oauth_client_id` are present (TC-SB408-V3).
-5. Verify discovery: `https://hzqqvbvhnzmgqivfigej.supabase.co/.well-known/oauth-authorization-server`
+   `oauth_client_id` are present (TC-SB408-V3), so this write doubles as a test.
+
+6. Verify discovery: `https://hzqqvbvhnzmgqivfigej.supabase.co/.well-known/oauth-authorization-server`
    resolves and lists the authorization and token endpoints.
-6. Site URL and every Redirect URL must be reachable HTTPS — no `localhost` in production.
+7. Site URL and every Redirect URL must be reachable HTTPS — no `localhost` in production.
 
 ## How the consent page behaves (already built)
 
@@ -45,7 +61,7 @@ Ticket SB-410 · Epic SB-406 · ADR-API-002 · Connection row `public.external_c
 - No client secret or service-role key is present: the page uses only the public anon key that
   every dashboard page already ships.
 
-## Acceptance still to run (blocked until steps 1–6 are done)
+## Acceptance still to run (blocked until steps 1–7 are done)
 
 | Case | What |
 |---|---|
