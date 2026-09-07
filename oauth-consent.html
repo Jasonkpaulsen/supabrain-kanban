@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approve Codex access — Paulsen Family Data</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 24px; max-width: 640px; margin-inline: auto; line-height: 1.45; }
+  h1 { font-size: 1.35rem; margin: 0 0 8px; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 16px; margin: 14px 0; }
+  .sensitive { border-color: #c0392b88; }
+  label.consent { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; }
+  label.consent input { margin-top: 4px; }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+  button { padding: 10px 18px; border-radius: 8px; border: 1px solid #8886; font-size: 1rem; cursor: pointer; }
+  #allow { background: #1f7a4d; color: #fff; border-color: #1f7a4d; }
+  #allow:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 12px; margin-top: 18px; }
+  .muted { color: #777; font-size: .9rem; }
+  .err { color: #c0392b; }
+  .hidden { display: none; }
+  input[type=email], input[type=password] { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid #8886; margin: 4px 0 10px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<h1>Approve Codex access to Paulsen Family data</h1>
+<p class="muted">SB-410 · ADR-API-002. This page authorizes <em>one</em> external application to act as <em>you</em>, inside the family projects where you are already a member. It never widens what you can see or change.</p>
+
+<section id="login" class="card hidden">
+  <h2>Sign in first</h2>
+  <p>Consent must come from a live Supabase login. Use your existing SupaBrain account — no new account is created.</p>
+  <input id="l-email" type="email" placeholder="email" autocomplete="username">
+  <input id="l-pass" type="password" placeholder="password" autocomplete="current-password">
+  <button id="l-btn">Sign in</button>
+  <p id="l-err" class="err"></p>
+</section>
+
+<section id="details" class="card hidden">
+  <h2>Who is asking</h2>
+  <p><strong id="client-name">…</strong> <span class="muted" id="client-id"></span></p>
+  <p class="muted">Will return you to: <code id="redirect"></code></p>
+  <p class="muted">Signed in as <span id="who"></span></p>
+</section>
+
+<section id="consent" class="hidden">
+  <div class="card">
+    <h3>1. Core family Kanban (read, create, update — never delete)</h3>
+    <ul>
+      <li>Projects you are a member of, their members, work items, comments, labels</li>
+      <li>Household, holiday and travel planning items; family calendar events; school assignments</li>
+    </ul>
+    <label class="consent"><input type="checkbox" id="c-core"> <span>Allow Codex to read and write these <strong>as me</strong>, in projects where I am a member.</span></label>
+  </div>
+
+  <div class="card sensitive">
+    <h3>2. Sensitive child health and care records</h3>
+    <p>Kai's and Jai's <strong>medications, health events, care plans (IEP/504, therapy), health providers, behavioral logs</strong>, and the read-only care audit log — for the child projects where you are a member. Medication changes will ask you to confirm each one separately and are audited. Provider portal credentials are never shown.</p>
+    <label class="consent"><input type="checkbox" id="c-medical"> <span>Allow Codex to read and update these sensitive records <strong>as me</strong>.</span></label>
+  </div>
+
+  <div class="card sensitive">
+    <h3>3. Family agents (act as a role in Codex)</h3>
+    <p>Lets Codex adopt the published role profiles of the eleven approved family agents (Family PM, Family Care Manager, Care Coordinator, EF Coach, School &amp; Activities Lead, Activities &amp; Schedule Coordinator, School Monitor, Parent Advocate, Travel Coordinator, Travel Planner, Travel Activities Coordinator). Agents run <em>in your session, with your permissions</em>; nothing runs in the background, and no agent can do what you cannot.</p>
+    <label class="consent"><input type="checkbox" id="c-agents"> <span>Allow Codex to use these agent roles on my behalf.</span></label>
+  </div>
+
+  <p class="muted">Consent is never inferred from your email address or your relationship to the children. All three sections must be allowed for this connection to work: declining any one of them denies the whole request and leaves Codex with no access. You can revoke access at any time from the family dashboard.</p>
+
+  <div class="row">
+    <button id="deny">Deny</button>
+    <button id="allow" disabled>Allow</button>
+  </div>
+  <p id="c-err" class="err"></p>
+</section>
+
+<section id="result" class="card hidden"><p id="result-text"></p></section>
+
+<script>
+var SB_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
+var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+var sb = window.supabase.createClient(SB_URL, SB_KEY);
+var authId = new URLSearchParams(location.search).get('authorization_id');
+var $ = function(id){ return document.getElementById(id); };
+function show(id, on){ $(id).classList.toggle('hidden', !on); }
+function finish(text){ show('consent', false); show('details', false); show('result', true); $('result-text').textContent = text; }
+
+async function boot(){
+  if (!authId) { finish('This page must be opened by the authorization server with an authorization_id. Nothing was approved.'); return; }
+  var s = await sb.auth.getSession();
+  if (!s.data.session) { show('login', true); return; }
+  show('login', false);
+  $('who').textContent = s.data.session.user.email;
+  try {
+    var d = await sb.auth.oauth.getAuthorizationDetails(authId);
+    if (d.error) throw d.error;
+    var det = d.data;
+    $('client-name').textContent = (det.client && det.client.name) || 'Unknown client';
+    $('client-id').textContent = det.client && det.client.id ? '(' + det.client.id + ')' : '';
+    $('redirect').textContent = det.redirect_uri || '';
+    show('details', true); show('consent', true);
+  } catch (e) {
+    finish('Could not load the authorization request: ' + (e.message || e) + '. Nothing was approved.');
+  }
+}
+function refreshAllow(){ $('allow').disabled = !($('c-core').checked && $('c-medical').checked && $('c-agents').checked); }
+['c-core','c-medical','c-agents'].forEach(function(id){ $(id).addEventListener('change', refreshAllow); });
+
+$('l-btn').onclick = async function(){
+  $('l-err').textContent = '';
+  var r = await sb.auth.signInWithPassword({ email: $('l-email').value.trim(), password: $('l-pass').value });
+  if (r.error) { $('l-err').textContent = r.error.message; return; }
+  boot();
+};
+$('deny').onclick = async function(){
+  var r = await sb.auth.oauth.denyAuthorization(authId);
+  if (r.error) { $('c-err').textContent = r.error.message; return; }
+  finish('Denied. Codex has no access to your family data. ' + (r.data && r.data.redirect_to ? 'Returning you to the application…' : ''));
+  if (r.data && r.data.redirect_to) location.href = r.data.redirect_to;
+};
+$('allow').onclick = async function(){
+  if ($('allow').disabled) return;
+  var r = await sb.auth.oauth.approveAuthorization(authId);
+  if (r.error) { $('c-err').textContent = r.error.message; return; }
+  finish('Approved. Codex can now act as you inside your family projects. ' + (r.data && r.data.redirect_to ? 'Returning you to the application…' : ''));
+  if (r.data && r.data.redirect_to) location.href = r.data.redirect_to;
+};
+boot();
+</script>
+</body>
+</html>
