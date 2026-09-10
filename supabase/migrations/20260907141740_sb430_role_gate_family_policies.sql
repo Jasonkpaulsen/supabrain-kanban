@@ -50,4 +50,4 @@ begin
     execute format('comment on policy %I on public.%I is %L', t.prefix || '_delete', t.tbl,
       'SB-430: DELETE is project-owner only (v1 no-DELETE contract for members). Reverse by adding the editor predicate if Jason chooses option (a).');
   end loop;
-end $$;
+end $$;;

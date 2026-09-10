@@ -18,4 +18,4 @@
 -- direct-DSN role there is no JWT at all, so the call returns null and the guard
 -- early-returns — which is the behaviour SB-409 intended for non-OAuth writers.
 
-grant execute on function public.oauth_client_id() to public;
+grant execute on function public.oauth_client_id() to public;;

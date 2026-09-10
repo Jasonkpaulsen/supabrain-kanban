@@ -19,4 +19,4 @@ comment on view public.external_connection_activity_metrics is
   'kind. security_invoker = true so RLS on the underlying table still applies (SB-431).';
 
 revoke all on public.external_connection_activity_metrics from public, anon, authenticated;
-grant select on public.external_connection_activity_metrics to authenticated, service_role;
+grant select on public.external_connection_activity_metrics to authenticated, service_role;;

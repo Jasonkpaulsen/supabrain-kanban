@@ -24,4 +24,4 @@ from anon, authenticated;
 revoke all on
   public.v_empty_epics, public.v_review_breaches_by_assignee, public.v_review_dwell_alerts,
   public.vw_agent_onboarding_gaps, public.vw_agent_onboarding_violations, public.vw_agent_roster_status, public.vw_review_sla
-from anon;
+from anon;;

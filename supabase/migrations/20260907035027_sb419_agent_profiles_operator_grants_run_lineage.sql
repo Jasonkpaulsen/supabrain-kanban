@@ -150,4 +150,4 @@ do $$ begin
   if not exists (select 1 from pg_trigger where tgrelid = 'public.agent_operator_grants'::regclass and tgname = 'trg_agent_operator_grants_updated_at') then
     create trigger trg_agent_operator_grants_updated_at before update on public.agent_operator_grants for each row execute function public.update_updated_at();
   end if;
-end $$;
+end $$;;

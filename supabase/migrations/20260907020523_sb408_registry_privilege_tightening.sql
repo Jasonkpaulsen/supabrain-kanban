@@ -7,4 +7,4 @@ grant select on table public.external_resource_catalog to authenticated;
 
 revoke truncate, references, trigger on table public.external_connections,
                                          public.external_connection_resource_grants
-  from authenticated;
+  from authenticated;;

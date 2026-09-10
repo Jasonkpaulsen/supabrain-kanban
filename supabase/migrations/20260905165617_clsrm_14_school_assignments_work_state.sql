@@ -39,4 +39,4 @@ COMMENT ON COLUMN public.school_assignments.work_state IS
 COMMENT ON COLUMN public.school_assignments.attachments IS
   'CLSRM-14: [{name, kind: drive|link|upload|photo, url?}] scoped to the "Your work" panel only.';
 COMMENT ON COLUMN public.school_assignments.details_scraped_at IS
-  'CLSRM-13/14: when the /details page was last read. One column for both parsers — they share one page load.';
+  'CLSRM-13/14: when the /details page was last read. One column for both parsers — they share one page load.';;

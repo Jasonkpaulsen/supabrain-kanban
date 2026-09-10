@@ -130,4 +130,4 @@ begin
       execute format('create policy oauth_client_deny on public.%I as restrictive for all to authenticated using (%s is null) with check (%s is null)', t.tbl, cid, cid);
     end if;
   end loop;
-end $$;
+end $$;;

@@ -53,4 +53,4 @@ where a.name in ('Care Coordinator','Parent Advocate')
      where g2.agent_id = g.agent_id
        and g2.principal_user_id = g.principal_user_id
        and g2.root_project_id = p.id
-  );
+  );;

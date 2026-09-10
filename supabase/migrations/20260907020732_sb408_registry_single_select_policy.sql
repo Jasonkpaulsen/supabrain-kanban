@@ -34,4 +34,4 @@ create policy owner_update on public.external_connection_resource_grants
   with check (exists (select 1 from public.external_connections c where c.id = connection_id and c.created_by = (select auth.uid())));
 create policy owner_delete on public.external_connection_resource_grants
   for delete to authenticated
-  using (exists (select 1 from public.external_connections c where c.id = connection_id and c.created_by = (select auth.uid())));
+  using (exists (select 1 from public.external_connections c where c.id = connection_id and c.created_by = (select auth.uid())));;

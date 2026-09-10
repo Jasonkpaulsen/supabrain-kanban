@@ -294,4 +294,4 @@ to authenticated;
 
 revoke execute on function family_gateway.authorize(uuid, uuid, text),
                            family_gateway.is_descendant_or_self(uuid, uuid)
-from public, anon, authenticated;
+from public, anon, authenticated;;

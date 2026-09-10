@@ -159,4 +159,4 @@ create policy members_insert on public.work_item_labels
   );
 
 comment on policy members_select on public.work_item_labels is 'SB-429: resolves through work_items.project_id to project membership.';
-comment on policy members_insert on public.work_item_labels is 'SB-429: owner/editor members may attach a label they can see. No member DELETE: removing a label stays owner-only under the v1 no-DELETE contract.';
+comment on policy members_insert on public.work_item_labels is 'SB-429: owner/editor members may attach a label they can see. No member DELETE: removing a label stays owner-only under the v1 no-DELETE contract.';;

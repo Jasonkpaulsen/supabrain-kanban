@@ -188,4 +188,4 @@ values ('c0de0000-0000-4000-a000-000000000408',
 
 insert into public.external_connection_resource_grants (connection_id, resource_name, operations, created_by)
 select 'c0de0000-0000-4000-a000-000000000408', resource_name, allowed_operations, '5ecbd44a-a3e2-4363-9133-dff3851ba0f5'
-from public.external_resource_catalog;
+from public.external_resource_catalog;;

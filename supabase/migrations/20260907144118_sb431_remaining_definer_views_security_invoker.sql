@@ -16,4 +16,4 @@ from anon;
 revoke insert, update, delete, truncate, references, trigger on
   public.v_backlog_grooming_queue, public.v_gate_leak_alerts, public.v_grooming_schedule, public.v_orphan_tasks,
   public.v_qa_coverage_authoritative, public.v_review_sla_breaches, public.v_wip_aging_alerts, public.vw_audit_health_checks
-from authenticated;
+from authenticated;;

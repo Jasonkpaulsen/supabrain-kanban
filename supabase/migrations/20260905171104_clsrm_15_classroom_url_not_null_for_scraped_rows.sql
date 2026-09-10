@@ -15,4 +15,4 @@ ALTER TABLE public.school_assignments
 
 COMMENT ON CONSTRAINT school_assignments_scraped_rows_have_a_link
   ON public.school_assignments IS
-  'CLSRM-15: a scraped row without its Classroom link fails loudly instead of silently dropping the link out of the daily report.';
+  'CLSRM-15: a scraped row without its Classroom link fails loudly instead of silently dropping the link out of the daily report.';;

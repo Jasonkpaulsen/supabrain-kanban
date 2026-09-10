@@ -216,4 +216,4 @@ begin
 end $fn$;
 
 revoke all on function public.set_external_connection_status(uuid, text, text) from public;
-grant execute on function public.set_external_connection_status(uuid, text, text) to authenticated, service_role;
+grant execute on function public.set_external_connection_status(uuid, text, text) to authenticated, service_role;;

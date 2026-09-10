@@ -35,4 +35,4 @@ as $fn$
          )
 $fn$;
 
-grant execute on function public.oauth_client_id() to public;
+grant execute on function public.oauth_client_id() to public;;
