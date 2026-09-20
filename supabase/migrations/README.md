@@ -59,3 +59,41 @@ the same as reproducing the database:
 
 That work is TC-SB437-V2 and V3. It needs a Supabase branch — $0.01344/hour on this
 organisation's plan, so roughly three cents for a create-replay-diff-destroy cycle.
+
+## Grants convention (SB-488, 2026-09-20)
+
+Since migration `20260920174123_sb488_new_public_objects_start_with_no_client_access`,
+a table, function or sequence created by the `postgres` role starts with **no**
+`anon` or `authenticated` access. Before that, Supabase's default privileges handed
+both roles ALL on every new table and EXECUTE on every new function the moment it
+was created — which is how `meta_key_registry` shipped anon-writable (SB-479) and
+why SB-237 had to `REVOKE ... FROM PUBLIC` before its revokes meant anything.
+
+What a migration must now do, and did not have to before:
+
+- **A table clients read or write through PostgREST** — `ENABLE ROW LEVEL SECURITY`,
+  write the policies, then `GRANT` exactly the verbs the client needs to exactly the
+  role that needs them. No grant means 42501 on the first call; that is the point.
+- **An RPC clients call** — `GRANT EXECUTE ... TO authenticated` (or `anon`) after the
+  `CREATE FUNCTION`. For `SECURITY DEFINER` functions, say in a comment who may call it
+  and why; the daily audit reports any such function `anon` can execute.
+- **Internal objects** (registries, audit tables, agent plumbing read over MCP as
+  `postgres` or `service_role`) — nothing. `service_role` keeps ALL by default and
+  bypasses RLS. Enable RLS anyway; the audit reports any table in `public` without it.
+- **Sequences** behind `serial`/`identity` columns a client inserts into — `GRANT USAGE`
+  to the inserting role, or the insert fails on the nextval.
+- **`CREATE EXTENSION`** — the function half of the default is global for the
+  `postgres` role (PostgreSQL offers no per-schema way to remove the built-in PUBLIC
+  EXECUTE), so an extension installed after 2026-09-20 has functions clients cannot
+  call until a migration grants EXECUTE on them. Extensions installed before are
+  unaffected.
+
+Existing objects were **not** changed by SB-488; every grant that existed on
+2026-09-20 still exists. The daily audit (`audit_client_role_exposure`, called from
+`generate_daily_audit`) compares today's client-role grants against
+`security_grant_baseline` and reports anything new, once, then records it. To make it
+re-raise a grant, delete that row from the baseline.
+
+Assert your grants inside the migration, in a `DO` block that raises on failure — the
+pattern in `20260920171712_sb479_lock_down_meta_key_registry`. A grant migration that
+can half-apply and record is worse than none.
