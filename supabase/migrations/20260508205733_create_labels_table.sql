@@ -23,11 +23,23 @@ CREATE POLICY "users_update_own" ON public.labels FOR UPDATE USING (auth.uid() =
 CREATE POLICY "users_delete_own" ON public.labels FOR DELETE USING (auth.uid() = user_id);
 CREATE POLICY "service_role_full" ON public.labels FOR ALL USING (true) WITH CHECK (true);
 
--- Seed default global labels
-INSERT INTO public.labels (user_id, name, color) VALUES
-  ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', 'Bug', '#f85149'),
-  ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', 'Feature', '#58a6ff'),
-  ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', 'Urgent', '#d29922'),
-  ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', 'Research', '#8b5cf6'),
-  ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', 'Blocked', '#8b949e');
+-- Seed default global labels.
+-- GUARDED 2026-09-20 (SB-439): labels.user_id references auth.users, which is
+-- empty on a fresh replay, so the original VALUES form failed on a foreign key.
+-- Driving the insert FROM auth.users makes it a no-op when the user is absent.
+-- The NOT EXISTS matches the unique index on (user_id, coalesce(project_id,...), name).
+INSERT INTO public.labels (user_id, name, color)
+SELECT u.id, v.name, v.color
+  FROM auth.users u
+  CROSS JOIN (VALUES
+    ('Bug', '#f85149'),
+    ('Feature', '#58a6ff'),
+    ('Urgent', '#d29922'),
+    ('Research', '#8b5cf6'),
+    ('Blocked', '#8b949e')
+  ) AS v(name, color)
+ WHERE u.id = '5ecbd44a-a3e2-4363-9133-dff3851ba0f5'
+   AND NOT EXISTS (
+         SELECT 1 FROM public.labels l
+          WHERE l.user_id = u.id AND l.name = v.name AND l.project_id IS NULL);
 ;

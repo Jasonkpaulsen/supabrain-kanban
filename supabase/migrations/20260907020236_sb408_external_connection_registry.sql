@@ -177,15 +177,29 @@ insert into public.external_resource_catalog (resource_name, table_name, allowed
   ('school_assignments',  'school_assignments',  array['select','insert','update'], '{}', 'family, no delete'),
   ('care_audit_log',      'care_audit_log',      array['select'],                   '{}', 'audit read only');
 
+-- GUARDED 2026-09-20 (SB-439): external_connections.principal_user_id and
+-- .created_by both reference auth.users, which is empty on a fresh replay. The
+-- grants insert additionally depends on the connection row above existing, so
+-- if the connection is skipped the grants skip with it rather than failing.
 insert into public.external_connections (id, name, principal_user_id, oauth_client_id, status, created_by, meta)
-values ('c0de0000-0000-4000-a000-000000000408',
-        'Mandy — Codex Family Data MCP (v1)',
-        '0dd94a9f-1890-48b0-9e4f-a4bbfff949f0',
-        null, 'proposed',
-        '5ecbd44a-a3e2-4363-9133-dff3851ba0f5',
-        jsonb_build_object('ticket','SB-408','epic','SB-406','adr','ADR-API-002',
-                           'activation_blocked_on','SB-410 registers the OAuth client and writes oauth_client_id'));
+select 'c0de0000-0000-4000-a000-000000000408',
+       'Mandy — Codex Family Data MCP (v1)',
+       '0dd94a9f-1890-48b0-9e4f-a4bbfff949f0',
+       null, 'proposed',
+       '5ecbd44a-a3e2-4363-9133-dff3851ba0f5',
+       jsonb_build_object('ticket','SB-408','epic','SB-406','adr','ADR-API-002',
+                          'activation_blocked_on','SB-410 registers the OAuth client and writes oauth_client_id')
+ where exists (select 1 from auth.users u where u.id = '0dd94a9f-1890-48b0-9e4f-a4bbfff949f0')
+   and exists (select 1 from auth.users u where u.id = '5ecbd44a-a3e2-4363-9133-dff3851ba0f5')
+   and not exists (select 1 from public.external_connections c
+                    where c.id = 'c0de0000-0000-4000-a000-000000000408');
 
 insert into public.external_connection_resource_grants (connection_id, resource_name, operations, created_by)
 select 'c0de0000-0000-4000-a000-000000000408', resource_name, allowed_operations, '5ecbd44a-a3e2-4363-9133-dff3851ba0f5'
-from public.external_resource_catalog;;
+from public.external_resource_catalog cat
+where exists (select 1 from public.external_connections c
+               where c.id = 'c0de0000-0000-4000-a000-000000000408')
+  and exists (select 1 from auth.users u where u.id = '5ecbd44a-a3e2-4363-9133-dff3851ba0f5')
+  and not exists (select 1 from public.external_connection_resource_grants g
+                   where g.connection_id = 'c0de0000-0000-4000-a000-000000000408'
+                     and g.resource_name = cat.resource_name);;
