@@ -9,6 +9,29 @@ DECLARE
   v_wi6 uuid; v_wi7 uuid; v_wi8 uuid; v_wi9 uuid; v_wi10 uuid;
   v_lbl_bug uuid; v_lbl_feature uuid; v_lbl_urgent uuid; v_lbl_research uuid; v_lbl_blocked uuid;
 BEGIN
+  -- GUARDED 2026-09-20 (SB-439), per the accepted decision "the migration
+  -- history rebuilds structure, not content".
+  --
+  -- This block seeds sample rows and depends on production data a fresh replay
+  -- does not have: the user (work_items.user_id -> auth.users) and four
+  -- projects (work_items.project_id -> projects). It also reads label ids
+  -- seeded by 20260508205733, which is itself guarded and contributes no rows
+  -- on an empty database, leaving v_lbl_* NULL.
+  --
+  -- ONE early return rather than a guard per insert, deliberately: the twelve
+  -- inserts below are interdependent -- each RETURNING id feeds later comment
+  -- and label rows -- so a partially applied seed would be worse than none.
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = v_user_id)
+     OR (SELECT count(*) FROM public.projects
+          WHERE id IN ('219c49e4-9953-41a8-a806-629e7dab00a5',
+                       'c89d95d1-e61f-4926-84f0-7b41bb581483',
+                       'a823caba-9416-4bdf-9bc0-86b3066f1e00',
+                       'a1b2c3d4-0001-0001-0001-000000000001')) < 4
+  THEN
+    RAISE NOTICE 'SB-439: skipping sample work-item seed -- the user or one of its four projects is absent. Expected on a fresh replay; the schema is unaffected.';
+    RETURN;
+  END IF;
+
   -- Get label IDs
   SELECT id INTO v_lbl_bug FROM public.labels WHERE user_id = v_user_id AND name = 'Bug';
   SELECT id INTO v_lbl_feature FROM public.labels WHERE user_id = v_user_id AND name = 'Feature';
