@@ -1,4 +1,20 @@
-
+-- GUARD ADDED 2026-09-20 (SB-439). The body below is otherwise unchanged.
+--
+-- This migration seeds a row. Replayed into an empty database it failed on a
+-- foreign key: decisions.project_id references projects(id) and
+-- decisions.user_id references auth.users(id), and a branch is created with
+-- no data by design. It was the first migration to stop the SB-439 replay
+-- after the object repairs landed (38 of 266).
+--
+-- Rewritten VALUES -> SELECT ... WHERE, following the pattern this codebase
+-- already established in 20260911044338_sb442_family_pm_agent_project_travel_planning:
+-- a data migration must not assume production rows exist. On an empty database
+-- the guards are false, the SELECT yields no rows, and the migration is a no-op.
+--
+-- Proven a no-op against production before committing: run in a rolled-back
+-- transaction, it inserted 0 rows, because the NOT EXISTS clause sees the row
+-- this migration created in May. The added NOT EXISTS also makes it idempotent,
+-- which the original gen_random_uuid() VALUES form was not.
 INSERT INTO public.decisions (
   id,
   project_id,
@@ -12,7 +28,8 @@ INSERT INTO public.decisions (
   archived,
   created_at,
   updated_at
-) VALUES (
+)
+SELECT
   gen_random_uuid(),
   '219c49e4-9953-41a8-a806-629e7dab00a5',
   '5ecbd44a-a3e2-4363-9133-dff3851ba0f5',
@@ -25,5 +42,13 @@ INSERT INTO public.decisions (
   false,
   now(),
   now()
-);
-;
+WHERE EXISTS (
+        SELECT 1 FROM public.projects p
+         WHERE p.id = '219c49e4-9953-41a8-a806-629e7dab00a5')
+  AND EXISTS (
+        SELECT 1 FROM auth.users u
+         WHERE u.id = '5ecbd44a-a3e2-4363-9133-dff3851ba0f5')
+  AND NOT EXISTS (
+        SELECT 1 FROM public.decisions d
+         WHERE d.title = 'Add Supabase Auth login to Job Pipeline Dashboard'
+           AND d.project_id = '219c49e4-9953-41a8-a806-629e7dab00a5');
