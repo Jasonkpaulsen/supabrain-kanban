@@ -1,0 +1,27 @@
+-- SB-480: repair. pg_cron is used by the history but never created by it.
+--
+-- 20260619021842_schedule_agent_runner calls cron.schedule(), and five later
+-- migrations do the same. On production pg_cron 1.6.4 lives in pg_catalog,
+-- enabled from the dashboard in June 2026 and never recorded here. A fresh
+-- replay has no cron schema at that point and stops at 142 of 266 (SB-439
+-- cycle 5, 2026-09-20). Every other extension the history fails to create is
+-- one Supabase provisions on a branch by default; pg_cron is the only gap,
+-- established by comparing pg_extension on production against a branch.
+--
+-- Placed at 20260619021800: strictly after 20260618205157 (the last migration
+-- the replay applied) and strictly before 20260619021842 (the first cron.*
+-- user). WITH SCHEMA pg_catalog pins where Supabase installs it, so the cron
+-- schema ACL and cron.job grants the later migrations rely on come out the
+-- same as production rather than wherever a default might put them.
+--
+-- On production this row is recorded as applied without having run, the
+-- treatment SB-439's and SB-478's repairs received under the decision "Option
+-- B -- supabase migration repair --status applied". The extension is already
+-- present there, and IF NOT EXISTS makes the statement a no-op wherever it is,
+-- so the production end state is unchanged by construction.
+--
+-- A third class of replay defect, distinct from SB-439's (object never
+-- created) and SB-478's (created in the wrong order): a platform extension
+-- enabled out-of-band. TC-SB439-V1 excludes extension-owned objects via
+-- pg_depend deptype = 'e' on purpose, which is why it could not see this.
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
