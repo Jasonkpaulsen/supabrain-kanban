@@ -97,3 +97,77 @@ re-raise a grant, delete that row from the baseline.
 Assert your grants inside the migration, in a `DO` block that raises on failure — the
 pattern in `20260920171712_sb479_lock_down_meta_key_registry`. A grant migration that
 can half-apply and record is worse than none.
+
+## Amending an already-applied migration (ADR-DL-003)
+
+Sometimes the right fix is to change a migration that has already run. That is
+permitted, and it is not a workaround — it is the only edit that reaches the
+mechanism a replay actually reads. Six existence guards and one `IF EXISTS` fix
+have been made this way.
+
+Three conditions, all of which must hold:
+
+1. **The amendment is provably inert on production.** `IF EXISTS` on an object
+   that exists; `CREATE OR REPLACE` with a byte-identical body; a guard whose
+   condition is already true. If running the amended statement against
+   production would change anything, this is not the right tool.
+2. **Both copies move together.** The history row and the repo file get the
+   *same textual replacement*, in one sitting. Never retype a multi-kilobyte
+   migration — `replace()` the row and `sed` the file with the same pattern.
+3. **md5 parity is verified before the commit, not after.**
+
+```sql
+-- what the file must hash to. Note WHICH convention this file uses:
+select md5(statements[1] || E';\n')   -- CLI convention, leaves the `;;` artefact
+from supabase_migrations.schema_migrations where version = '…';
+```
+
+Older files use `statement || ';\n'` and therefore end `;;`. Newer ones written
+by `apply_migration` use `statement || '\n'`. Check which before comparing, and
+leave the artefact alone — it is the CLI's canonical output.
+
+### Produce the file from the row's bytes, never from a rendering
+
+```sql
+select encode(convert_to(statements[1] || E'\n', 'UTF8'), 'base64') …
+```
+
+then base64-decode it to disk. A JSON rendering of a statement doubles
+backslashes: a repair file written that way carried `'\\s+'` where the function
+has `'\s+'` — one byte, a silently different regex, caught only because the md5
+disagreed. Any statement containing a backslash or a non-ASCII character
+**must** go through base64.
+
+## Assert your migration inside itself
+
+Every migration that changes structure, grants or RLS ends with a `DO` block
+that checks its own acceptance criteria and raises on failure:
+
+```sql
+do $$
+begin
+  if <the thing this migration promised> is not true then
+    raise exception 'SB-NNN: <what did not hold>';
+  end if;
+end $$;
+```
+
+A migration that can half-apply and still be recorded as applied is worse than
+no migration. This is not theoretical: two drafts of `20260920175054` aborted on
+their own assertions — a 63-byte `name` type truncating function signatures in a
+`UNION`, and `pg_get_function_identity_arguments` rendering a `vector` argument
+differently depending on `search_path` — and so never recorded a wrong state.
+
+## Before you trust a scan of this history (ADR-TEST-002)
+
+Five scans of these migrations reported clean in one day while each answered a
+question *adjacent* to the one it claimed: a seed scan that excluded `CREATE
+TABLE` migrations, a scan that assumed everything in dollar quotes is deferred
+(true of function bodies, false of `DO` blocks), a `DROP POLICY` scan that
+checked whether the *table* existed rather than the *policy*, and two rendering
+bugs in a grant baseline.
+
+A broken scan and a clean history produce the same output. **Backtest against
+known failures before believing a result** — the reconciliation in
+`TC-SB439-V6` lists the five replay failures it must reproduce, and it only
+passed after two bugs in the scan itself were fixed.
