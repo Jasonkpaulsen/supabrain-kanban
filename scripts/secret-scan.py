@@ -220,7 +220,15 @@ def scan_text(rel: str, text: str, allow: dict, new_lines_only: bool = False) ->
 
 def staged_paths() -> list[str]:
     """Paths git is about to commit, filtered to types we scan."""
-    out = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+    # core.quotePath=false is load-bearing, not tidiness. With git's default,
+    # a path containing non-ASCII bytes comes back C-quoted --
+    #   "supabase/functions/w\303\251ird dir/index.ts"
+    # -- whose suffix reads '.ts"', so the SCAN_EXT filter silently dropped it
+    # and the file was never scanned. Found by QA on SB-496, after the argv
+    # half of "handle unusual filenames" had been done and this half missed.
+    # Plain spaces never needed it; non-ASCII did.
+    out = subprocess.run(["git", "-c", "core.quotePath=false",
+                          "diff", "--cached", "--name-only", "--diff-filter=ACM"],
                          cwd=ROOT, capture_output=True, text=True).stdout
     return [f for f in out.splitlines() if f and Path(f).suffix in SCAN_EXT]
 
@@ -381,7 +389,23 @@ def staged_integration_test() -> tuple[int, int]:
         print(f"  [{'clean' if ok else 'FALSE'}] clean staged, working tree dirty -> exit {rc}"
               + ("" if ok else "   <-- refuses a commit git would not make"))
 
-        # 3. staged for deletion -> must not crash
+        # 3. a path with non-ASCII characters must still be scanned. git
+        #    C-quotes such paths by default and the quoted form's suffix is
+        #    '.ts"', which the type filter drops -- silently.
+        odd = "supabase/functions/wéird dir/index.ts"
+        (tmp / odd).parent.mkdir(parents=True, exist_ok=True)
+        (tmp / odd).write_text(SECRET_FILE)
+        _git(tmp, "add", odd)
+        (tmp / odd).write_text(CLEAN_FILE)
+        rc = run_staged(); ran += 1
+        ok = rc == 1
+        bad += 0 if ok else 1
+        print(f"  [{'CATCH' if ok else 'MISS '}] credential staged under a non-ASCII path -> exit {rc}"
+              + ("" if ok else "   <-- file never scanned"))
+        _git(tmp, "reset", "-q")
+        (tmp / odd).unlink()
+
+        # 4. staged for deletion -> must not crash
         _git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
         _git(tmp, "rm", "-q", rel)
         rc = run_staged(); ran += 1
