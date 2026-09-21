@@ -171,3 +171,59 @@ A broken scan and a clean history produce the same output. **Backtest against
 known failures before believing a result** — the reconciliation in
 `TC-SB439-V6` lists the five replay failures it must reproduce, and it only
 passed after two bugs in the scan itself were fixed.
+
+## Secrets convention (SB-446, 2026-09-21)
+
+Four live credentials have been found in this project: SB-408, SB-440, SB-447,
+SB-493. SB-440 was committed into a migration **in this public repository** by a
+model and sat there for weeks; it was found by a QA definition pull, not by
+review, and a second reviewer would not have caught it either because it looked
+like ordinary migration boilerplate.
+
+**A migration never contains a credential.** Not a token, not a key, not a
+password, not a DSN. If a migration needs one, it reads it by *name*:
+
+```sql
+create or replace function public.<thing>_headers()
+returns jsonb language sql stable security definer set search_path to ''
+as $function$
+  select jsonb_build_object(
+           'Content-Type', 'application/json',
+           'x-token', (select s.decrypted_secret
+                         from vault.decrypted_secrets s
+                        where s.name = '<thing>_token'))
+$function$;
+
+revoke all on function public.<thing>_headers() from public, anon, authenticated;
+grant execute on function public.<thing>_headers() to service_role;
+```
+
+An edge function never holds the token either. It asks the database whether the
+presented value matches, via a `..._token_matches(text)` returning **boolean and
+nothing else**, so a compromised function cannot read the secret back out.
+
+The Vault secret row itself is created **out of band**, with the value generated
+inside the database (`encode(gen_random_bytes(32),'base64')`) so it never passes
+through a transcript. The migration header records that omission as deliberate —
+see `20260921011023` and `20260921022409`. A rebuilt copy therefore gets the
+accessors and no secret, and the check fails closed, which is correct: a fresh
+environment must be given its own token rather than inherit production's.
+
+**`REVOKE ... FROM PUBLIC` does not undo Supabase's default grants.** Those are
+made to `anon` and `authenticated` **by role name**, so a revoke naming only
+`PUBLIC` changes nothing. This has been got wrong three times (SB-408, SB-440's
+own fix, SB-447). Always name the roles:
+
+```sql
+revoke all on function public.f() from public, anon, authenticated;
+```
+
+`scripts/secret-scan.py` enforces all of the above. It runs in CI on every push
+and can be installed locally with `git config core.hooksPath .githooks`. It
+carries its own backtest against the real incidents — run
+`python3 scripts/secret-scan.py --self-test` — because a clean result from a
+broken detector is indistinguishable from a clean repository (ADR-TEST-002).
+
+Exceptions go in `.secret-scan-allow.json` as a **fingerprint plus a path plus a
+reason**, never as a value. Widening a rule to silence a finding is the wrong
+fix; the allowlist is a reviewable diff, a loosened regex is not.
