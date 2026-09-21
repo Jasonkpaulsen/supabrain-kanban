@@ -74,6 +74,17 @@ RULES = [
         group=1,
     ),
     dict(
+        id="SECRET_KEY_IN_SOURCE",
+        incident="SB-182 — the migration that put a publishable key in config.js on purpose.",
+        why=("An sb_secret_... key or a service_role JWT in committed source. Publishable keys "
+             "(sb_publishable_...) are DESIGNED to ship in client code and are not flagged; "
+             "secret keys bypass Row Level Security entirely and must live in Vault or in Edge "
+             "Function secrets. The two differ by one word, which is exactly why a rule reads "
+             "them rather than a person."),
+        pattern=re.compile(r"""(sb_secret_[A-Za-z0-9_-]{10,})"""),
+        group=1,
+    ),
+    dict(
         id="LONG_OPAQUE_LITERAL",
         incident="SB-440 — the shape a base64/hex secret takes inside a migration or an edge function.",
         why="A long opaque string literal in supabase/functions or supabase/migrations.",
@@ -285,6 +296,8 @@ files_to_scan.skipped_for_extension = 0
 # value replaced. Every NEGATIVE is the fixed form now in the repository.
 # --------------------------------------------------------------------------
 POSITIVES = [
+    ("SB-182 inverse: a SECRET key pasted into client config", "config.js",
+     """window.SB_CONFIG = { key: 'sb_secret_9QvZb2Rt7mLpW1yE4aNc_h8sUdF6' };"""),
     ("SB-440: token in a migration's http_post headers", "supabase/migrations/x.sql",
      """select net.http_post(url:='https://x.supabase.co/functions/v1/agent-runner',"""
      """ headers:='{"Content-Type":"application/json","x-token":"Nx7Qv2ZbK4tR9mLpW1yE"}'::jsonb);"""),
@@ -304,6 +317,8 @@ POSITIVES = [
 ]
 
 NEGATIVES = [
+    ("SB-182: a PUBLISHABLE key in client config is correct, not a leak", "config.js",
+     """window.SB_CONFIG = { key: 'sb_publishable_J-MA9d1UXLGwAZCLnSiSLg_cll_PQNv' };"""),
     ("Vault helper supplies the headers", "supabase/migrations/a.sql",
      """headers:=public.agent_runner_headers(),"""),
     ("Vault read inside a SECURITY DEFINER accessor", "supabase/migrations/b.sql",

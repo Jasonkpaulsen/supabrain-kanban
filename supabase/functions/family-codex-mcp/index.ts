@@ -15,7 +15,30 @@
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+// SB-182: the API key that identifies this app to PostgREST. It is NOT what
+// authorizes the request — every call below carries the caller's own OAuth
+// token in Authorization, and RLS is the enforcement point.
+//
+// Prefers the publishable key and falls back to the legacy anon key, so this
+// function keeps working both before and after the legacy key is deactivated.
+// SUPABASE_PUBLISHABLE_KEYS is a JSON object keyed by key name, not a bare
+// string like the legacy variable was.
+function resolveApiKey(): string {
+  const raw = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");
+  if (raw) {
+    try {
+      const keys = JSON.parse(raw) as Record<string, string>;
+      const k = keys["default"] ?? Object.values(keys)[0];
+      if (k) return k;
+    } catch {
+      // Malformed value: fall through to the legacy key rather than 500.
+    }
+  }
+  const legacy = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!legacy) throw new Error("No Supabase API key available (checked SUPABASE_PUBLISHABLE_KEYS then SUPABASE_ANON_KEY)");
+  return legacy;
+}
+const API_KEY = resolveApiKey();
 const ISSUER = `${SUPABASE_URL}/auth/v1`;
 const JWKS = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`));
 const REST = `${SUPABASE_URL}/rest/v1`;
@@ -164,7 +187,7 @@ async function rest(caller: Caller, path: string, init: RequestInit = {}) {
       ...init,
       signal: ctl.signal,
       headers: {
-        apikey: ANON_KEY,
+        apikey: API_KEY,
         Authorization: `Bearer ${caller.token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
