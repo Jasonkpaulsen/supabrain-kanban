@@ -218,17 +218,58 @@ def scan_text(rel: str, text: str, allow: dict, new_lines_only: bool = False) ->
     return out
 
 
+def staged_paths() -> list[str]:
+    """Paths git is about to commit, filtered to types we scan."""
+    out = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                         cwd=ROOT, capture_output=True, text=True).stdout
+    return [f for f in out.splitlines() if f and Path(f).suffix in SCAN_EXT]
+
+
+def read_staged(rel: str) -> str | None:
+    """The bytes git will commit for `rel`, or None if there are none.
+
+    SB-496: --staged used to take its file list from the index and then read the
+    contents FROM DISK. Those are different bytes, so the hook judged something
+    git was not about to commit. Reproduced both ways: a clean staged blob with
+    a dirty tree refused a good commit, and -- the one that matters -- a
+    credential staged with a clean tree PASSED and was committed. `git add`
+    then edit is ordinary, and `git add -p` produces it every time.
+
+    Reading from the index also fixes a second hole in the same area: the old
+    path required the file to exist on disk, so staging a secret and then
+    deleting the working copy skipped the file entirely.
+
+    argv is passed as a list, never interpolated into a shell, so paths with
+    spaces or non-ASCII names are safe.
+    """
+    r = subprocess.run(["git", "show", f":{rel}"], cwd=ROOT, capture_output=True)
+    if r.returncode != 0:
+        return None          # staged for deletion, or otherwise not in the index
+    return r.stdout.decode("utf-8", errors="replace")
+
+
 def files_to_scan(only: list[str] | None) -> list[Path]:
     if only:
         return [ROOT / f for f in only if (ROOT / f).is_file()]
-    found = []
+    found, skipped = [], 0
     for p in ROOT.rglob("*"):
-        if not p.is_file() or p.suffix not in SCAN_EXT:
+        if not p.is_file():
             continue
         if any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts):
             continue
+        if p.suffix not in SCAN_EXT:
+            # SCAN_EXT is an allowlist, so an unlisted type is skipped. Count
+            # them so the gap is visible: a future .env, .toml or Dockerfile
+            # would be skipped the same way, and .env is the commonest place a
+            # credential lands.
+            skipped += 1
+            continue
         found.append(p)
+    files_to_scan.skipped_for_extension = skipped
     return found
+
+
+files_to_scan.skipped_for_extension = 0
 
 
 # --------------------------------------------------------------------------
@@ -282,6 +323,75 @@ NEGATIVES = [
 ]
 
 
+def _git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def staged_integration_test() -> tuple[int, int]:
+    """SB-496: does --staged judge the bytes git is about to commit?
+
+    This cannot be a rule fixture. Every rule was already correct when this bug
+    shipped; the defect was in WHICH BYTES the rules were pointed at. So the
+    only test that can see it drives a real index: stage one thing, write
+    another, and check the exit code.
+
+    Asserts on behaviour -- the process exit status -- not on whether the
+    source happens to contain "git show". This project has twice shipped
+    assertions that checked structure while the failure was in behaviour
+    (CLSRM-39 part 2, TC-SB481-V4).
+    """
+    import shutil, tempfile
+    if not shutil.which("git"):
+        print("  [skip ] git unavailable -- staged-index cases NOT run (this is a gap, not a pass)")
+        return 0, 0
+
+    SECRET_FILE = 'const TOKEN = "Nx7Qv2ZbK4tR9mLpW1yE";\n'
+    CLEAN_FILE = 'const cfg = { name: "clean" };\n'
+    rel = "supabase/functions/probe/index.ts"
+    ran = bad = 0
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "scripts").mkdir()
+        shutil.copy(Path(__file__), tmp / "scripts" / "secret-scan.py")
+        (tmp / rel).parent.mkdir(parents=True)
+        _git(tmp, "init", "-q")
+
+        def run_staged():
+            return subprocess.run([sys.executable, str(tmp / "scripts" / "secret-scan.py"), "--staged"],
+                                  cwd=tmp, capture_output=True, text=True).returncode
+
+        # 1. secret in the index, working tree cleaned afterwards -> must FAIL
+        (tmp / rel).write_text(SECRET_FILE)
+        _git(tmp, "add", rel)
+        (tmp / rel).write_text(CLEAN_FILE)
+        rc = run_staged(); ran += 1
+        ok = rc == 1
+        bad += 0 if ok else 1
+        print(f"  [{'CATCH' if ok else 'MISS '}] credential staged, working tree clean -> exit {rc}"
+              + ("" if ok else "   <-- the secret would be COMMITTED"))
+
+        # 2. clean index, dirty working tree -> must PASS (no false positive)
+        (tmp / rel).write_text(CLEAN_FILE)
+        _git(tmp, "add", rel)
+        (tmp / rel).write_text(SECRET_FILE)
+        rc = run_staged(); ran += 1
+        ok = rc == 0
+        bad += 0 if ok else 1
+        print(f"  [{'clean' if ok else 'FALSE'}] clean staged, working tree dirty -> exit {rc}"
+              + ("" if ok else "   <-- refuses a commit git would not make"))
+
+        # 3. staged for deletion -> must not crash
+        _git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
+        _git(tmp, "rm", "-q", rel)
+        rc = run_staged(); ran += 1
+        ok = rc in (0, 1)
+        bad += 0 if ok else 1
+        print(f"  [{'clean' if ok else 'CRASH'}] path staged for deletion -> exit {rc}")
+
+    return ran, bad
+
+
 def self_test() -> int:
     allow = {}
     bad = 0
@@ -297,11 +407,15 @@ def self_test() -> int:
         ok = not hits
         print(f"  [{'clean' if ok else 'FALSE'}] {name}" + ("" if ok else f"   <-- {hits[0]['rule']}"))
         bad += 0 if ok else 1
+    print("\nStaged-index cases -- do we judge the bytes git will commit? (SB-496):")
+    int_ran, int_bad = staged_integration_test()
+    bad += int_bad
     print()
     if bad:
         print(f"SELF-TEST FAILED: {bad} case(s) wrong. The scanner is not trustworthy; fix it before trusting a clean scan.")
         return 1
-    print(f"SELF-TEST PASSED: {len(POSITIVES)} incidents caught, {len(NEGATIVES)} clean forms not flagged.")
+    print(f"SELF-TEST PASSED: {len(POSITIVES)} incidents caught, {len(NEGATIVES)} clean forms "
+          f"not flagged, {int_ran} staged-index case(s) correct.")
     return 0
 
 
@@ -325,23 +439,30 @@ def main() -> int:
         if not only:
             print("secret-scan: no scannable files in the change set.")
             return 0
-    if args.staged:
-        out = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                             cwd=ROOT, capture_output=True, text=True).stdout
-        only = [f for f in out.split() if Path(f).suffix in SCAN_EXT]
-        if not only:
-            print("secret-scan: nothing staged to scan.")
-            return 0
-
     allow = load_allow()
     findings = []
-    for p in files_to_scan(only):
-        rel = str(p.relative_to(ROOT))
-        try:
-            findings += scan_text(rel, p.read_text(errors="replace"), allow,
-                                  new_lines_only=new_lines)
-        except OSError:
-            continue
+    scanned = 0
+
+    if args.staged:
+        paths = staged_paths()
+        if not paths:
+            print("secret-scan: nothing staged to scan.")
+            return 0
+        for rel in paths:
+            text = read_staged(rel)
+            if text is None:
+                continue
+            scanned += 1
+            findings += scan_text(rel, text, allow, new_lines_only=True)
+    else:
+        for p in files_to_scan(only):
+            rel = str(p.relative_to(ROOT))
+            try:
+                text = p.read_text(errors="replace")
+            except OSError:
+                continue
+            scanned += 1
+            findings += scan_text(rel, text, allow, new_lines_only=new_lines)
 
     blocking = [f for f in findings if f["blocking"]]
     advisory = [f for f in findings if not f["blocking"]]
@@ -357,7 +478,12 @@ def main() -> int:
         print("  state. This rule blocks only on newly added lines.\n")
 
     if not blocking:
-        print(f"secret-scan: clean ({len(files_to_scan(only))} files, {len(allow)} allowlisted value(s)).")
+        extra = ""
+        if not args.staged and files_to_scan.skipped_for_extension:
+            extra = (f", {files_to_scan.skipped_for_extension} skipped for extension"
+                     f" (SCAN_EXT is an allowlist)")
+        src = "staged" if args.staged else "files"
+        print(f"secret-scan: clean ({scanned} {src}, {len(allow)} allowlisted value(s){extra}).")
         return 0
 
     findings = blocking
