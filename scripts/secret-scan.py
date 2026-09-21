@@ -81,17 +81,46 @@ RULES = [
         group=1,
         paths=("supabase/functions/", "supabase/migrations/"),
     ),
-    dict(
-        id="REVOKE_FROM_PUBLIC_ONLY",
-        incident="SB-408, and the same mistake repeated inside SB-440's own fix.",
-        why=("REVOKE ... FROM PUBLIC does not undo Supabase's default ACL grants, which are made "
-             "to anon and authenticated BY ROLE NAME. A revoke that names only PUBLIC changes nothing. "
-             "Name anon and authenticated explicitly."),
-        pattern=re.compile(r"^\s*revoke\s+[^;]*?\bfrom\s+public\s*;", re.I | re.M),
-        group=0,
-        kind="antipattern",
-    ),
 ]
+
+# REVOKE_FROM_PUBLIC_ONLY is not a line rule.
+#
+# The first version was: any `revoke ... from public;` is suspect. CI proved
+# that wrong within a minute of shipping -- it flagged SB-440's own fix, where
+# line 24 revokes from public and a later line revokes from anon and
+# authenticated. Live grants confirmed those functions have no client access at
+# all, so every hit was false.
+#
+# That is the TC-SB481-V4 failure mode: a check that resolves to an easier
+# question than the one asked. The question is not "does this statement name
+# only PUBLIC" but "is this function LEFT reachable by a client role after the
+# whole file has run". So gather every revoke per target and judge the union.
+REVOKE_RE = re.compile(
+    r"revoke\s+(?:all|execute)[^;]*?\bon\s+function\s+([^;]+?)\s+from\s+([^;]+);",
+    re.I | re.S,
+)
+
+
+def revoke_findings(rel: str, text: str) -> list[dict]:
+    targets: dict[str, dict] = {}
+    for m in REVOKE_RE.finditer(text):
+        sig = re.sub(r"\s+", " ", m.group(1)).strip().lower()
+        roles = {r.strip().lower() for r in m.group(2).split(",")}
+        t = targets.setdefault(sig, {"roles": set(), "line": text.count("\n", 0, m.start()) + 1})
+        t["roles"] |= roles
+    out = []
+    for sig, t in targets.items():
+        if "public" in t["roles"] and not (t["roles"] & {"anon", "authenticated"}):
+            out.append(dict(
+                rule="REVOKE_FROM_PUBLIC_ONLY", file=rel, line=t["line"],
+                fingerprint=fingerprint(sig), blocking=True, kind="antipattern",
+                incident="SB-408, and the same mistake repeated inside SB-440's own fix.",
+                why=("REVOKE ... FROM PUBLIC does not undo Supabase's default ACL grants, which "
+                     "are made to anon and authenticated BY ROLE NAME. This file revokes "
+                     f"{sorted(t['roles'])} on this function and never names anon or "
+                     "authenticated, so a client role may still hold EXECUTE."),
+                preview=f"revoke on function {sig} from {sorted(t['roles'])}"))
+    return out
 
 # Hashes are not secrets; they appear legitimately in this repo's migration notes.
 HASH_LEN = {32, 40, 64}  # md5, sha1, sha256 rendered as hex
@@ -154,13 +183,18 @@ def scan_text(rel: str, text: str, allow: dict, new_lines_only: bool = False) ->
     that rule blocks on the diff and merely reports on the tree.
     """
     out = []
+    for f in revoke_findings(rel, text):
+        if (f["fingerprint"], rel) in allow:
+            continue
+        f["blocking"] = new_lines_only      # advisory across applied history
+        out.append(f)
     for rule in RULES:
         if "paths" in rule and not any(rel.startswith(p) for p in rule["paths"]):
             continue
-        blocking = rule.get("kind") != "antipattern" or new_lines_only
+        blocking = True
         for m in rule["pattern"].finditer(text):
             value = m.group(rule["group"])
-            if rule.get("kind") != "antipattern":
+            if True:
                 # An Authorization value is "<scheme> <credential>". Judge the
                 # credential, not the scheme -- the backtest caught this: the
                 # whitespace-means-prose heuristic below was swallowing
@@ -180,8 +214,7 @@ def scan_text(rel: str, text: str, allow: dict, new_lines_only: bool = False) ->
             line = text.count("\n", 0, m.start()) + 1
             out.append(dict(rule=rule["id"], file=rel, line=line, fingerprint=fp, blocking=blocking,
                             incident=rule["incident"], why=rule["why"],
-                            preview=(value[:6] + "…" + f"[{len(value)} chars]")
-                                    if rule.get("kind") != "antipattern" else value.strip()[:90]))
+                            preview=value[:6] + "…" + f"[{len(value)} chars]"))
     return out
 
 
@@ -214,7 +247,7 @@ POSITIVES = [
      '''const SERVICE_ROLE_KEY = "sbp_0123456789abcdefghijklmnopqrstuvwxyz";'''),
     ("Bearer credential in a TS header object", "supabase/functions/f/index.ts",
      '''headers: { authorization: "Bearer aK9x2Lm4Qv7ZbR1tE5yW" }'''),
-    ("SB-408: revoke that names only PUBLIC", "supabase/migrations/z.sql",
+    ("SB-408: a function whose only revoke names PUBLIC", "supabase/migrations/z.sql",
      """revoke all on function public.classroom_get_secret(text) from public;"""),
     ("A base64 token pasted bare into a migration (must survive the UUID tightening)",
      "supabase/migrations/w.sql",
@@ -232,6 +265,12 @@ NEGATIVES = [
      '''const { data: ok } = await sb.rpc("lce_cleanup_token_matches", { p_token: presented });'''),
     ("Revoke that names the roles explicitly", "supabase/migrations/c.sql",
      """revoke all on function public.f() from public, anon, authenticated;"""),
+    ("SB-440's real shape: public on one line, the roles on another",
+     "supabase/migrations/g.sql",
+     """revoke all on function public.agent_runner_headers() from public;\n"""
+     """revoke all on function public.agent_runner_headers() from anon;\n"""
+     """revoke all on function public.agent_runner_headers() from authenticated;\n"""
+     """grant execute on function public.agent_runner_headers() to service_role;"""),
     ("An md5 recorded in a migration note", "supabase/migrations/d.sql",
      """-- md5 9d18a76ad3fb8712a89a0c95593ef9b5 matches the history row"""),
     ("A content-type header", "supabase/functions/f/index.ts",
