@@ -1,0 +1,41 @@
+# SB-506 — run the edge function unit tests on every push.
+#
+# Same posture as secret-scan.yml: NO secrets, `contents: read` only. These
+# tests are pure functions over strings; they need no network, no database and
+# no credentials, and a job that needs none should be given none.
+#
+# Node 22 runs TypeScript directly with --experimental-strip-types, so the tests
+# import the exact modules that are deployed rather than a transpiled copy.
+
+name: function-tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run edge function tests
+        run: |
+          mapfile -t FILES < <(find supabase/functions -name '*.test.ts' | sort)
+          # A runner that finds nothing reports success. ADR-TEST-002: a check
+          # that cannot fail is not a check, so finding zero files is a failure.
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::no *.test.ts files found under supabase/functions -- refusing to report green"
+            exit 1
+          fi
+          printf 'test file: %s\n' "${FILES[@]}"
+          node --experimental-strip-types --test "${FILES[@]}"

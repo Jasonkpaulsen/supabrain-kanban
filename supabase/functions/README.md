@@ -17,7 +17,7 @@ checked, and — more usefully — what has **not**.
 | `generate-memory-embeddings` | v2 | false | yes | SB-501 |
 | `search-skills` | v2 | false | yes | SB-501 |
 | `test-key` | v9 | **true** | yes | SB-501 |
-| `lce-image-ingest` | v2 | false | yes | SB-497 |
+| `lce-image-ingest` | v3 | false | yes | SB-497, SB-506 |
 
 Before SB-501 the default branch carried **no** `supabase/functions/` directory
 at all; the three earlier captures existed only on unmerged feature branches.
@@ -85,17 +85,23 @@ Recorded at capture (2026-09-23), `sha256` truncated to 16 hex chars:
 | `generate-memory-embeddings` | `af5062453db5f793` | 3563 | 62 |
 | `generate-skill-embeddings` | `140b39cbd4d442d6` | 4388 | 156 |
 | `lce-cleanup` | `25ac19af2ec7b471` | 5074 | 83 |
-| `lce-image-ingest` | `0e488edf95780a45` | 2943 | 60 |
+| `lce-image-ingest` | `3e161930acc90bdf` | 3385 | 69 |
+| `lce-image-ingest/path.ts` | `202ae0b293706998` | 3052 | 62 |
 | `search-skills` | `90e00d061e3ee120` | 3109 | 107 |
 | `supabrain-sweep` | `132d9efbd544ca8f` | 16428 | 365 |
 | `test-key` | `1ae26f5d41034cf4` | 833 | 20 |
 
+`lce-image-ingest` is the only multi-file function: `index.ts` imports
+`path.ts`, and both are deployed. `path.test.ts` sits beside them and is NOT
+deployed -- it runs in CI (`.github/workflows/function-tests.yml`).
+
 Regenerate and compare:
 
 ```bash
-for d in supabase/functions/*/; do
-  f="$d/index.ts"; [ -f "$f" ] || continue
-  printf '%-28s %s\n' "$(basename "$d")" "$(sha256sum "$f" | cut -c1-16)"
+# Every deployed .ts file, not just index.ts -- lce-image-ingest also ships
+# path.ts, and a loop over index.ts alone would skip it without saying so.
+find supabase/functions -name '*.ts' ! -name '*.test.ts' | sort | while read -r f; do
+  printf '%-45s %s\n' "${f#supabase/functions/}" "$(sha256sum "$f" | cut -c1-16)"
 done
 ```
 
@@ -103,10 +109,11 @@ Byte counts and character counts differ wherever a file uses em dashes or
 arrows — several of these do. Compare the checksum, not `wc -c`. (CLSRM-34
 recorded that exact false positive on day one.)
 
-## Three observations recorded, not fixed here
+## Three observations recorded at capture
 
-None is in the scope of the ticket that found it; all three came from reading
-these sources rather than from review of a change.
+None was in the scope of the ticket that found it; all three came from reading
+these sources rather than from review of a change. The third has since been
+fixed; the first two remain open as SB-503 and SB-504.
 
 1. **`search-skills` and `generate-skill-embeddings` accept an API key in the
    request body** — `Deno.env.get("OPENAI_API_KEY") || body.openai_api_key` —
@@ -116,15 +123,13 @@ these sources rather than from review of a change.
    2026-04-19, asks for it to be deleted from the dashboard. It is the only one
    of the ten with `verify_jwt=true`, so the stub is not publicly callable, but
    a retired function that is still deployed is still an endpoint.
-3. **`lce-image-ingest` interpolates a caller-supplied `path` into the storage
-   URL, and `..` escapes the bucket** (SB-506). `../avatars/x.png` normalises to
-   `/storage/v1/object/avatars/x.png`; percent-encoded `..%2F` does not. Verified
-   by URL normalisation, not exploited. Severity today is bounded: it is
-   token-gated, and exactly one bucket exists, so there is nothing to escape
-   into. It is latent — it activates the moment a second bucket is created.
-   Deliberately not fixed in SB-497, because changing the accepted path shape in
-   the same deployment as a credential rotation would make any breakage
-   impossible to attribute to one or the other.
+3. ~~**`lce-image-ingest` interpolates a caller-supplied `path` into the storage
+   URL, and `..` escapes the bucket.**~~ **Resolved by SB-506, v3,
+   2026-09-23.** `path.ts` validates in two independent layers -- an allowlist
+   policy and a parsed-pathname invariant -- tested against every object name
+   in the bucket (so no real caller breaks) and mutation-tested (six mutants,
+   six killed). Verified live: every recorded escape now returns 400 with a
+   specific reason, and nothing was written.
 
 ## Deployment
 

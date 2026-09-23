@@ -18,14 +18,19 @@
 // that returns the plaintext secret would have no caller to justify it. The
 // SB-497 migration asserts that it does not exist.
 //
-// Nothing else about this function's behaviour changed in SB-497. In
-// particular the caller-supplied `path` is still interpolated into the storage
-// URL exactly as before; that is recorded as SB-506 rather than altered here,
-// because changing the accepted path shape at the same time as rotating the
-// credential would make a breakage impossible to attribute to one or the other.
+// SB-497 deliberately left the caller-supplied `path` alone, so that a
+// breakage could be attributed to the rotation or to path handling, not both.
+//
+// SB-506 (2026-09-23): `path` used to be interpolated straight into the storage
+// URL, and URL parsing normalises ".." -- so "../avatars/x.png" escaped the
+// bucket, writing with the service-role key. It is now validated in path.ts by
+// two independent layers: an allowlist policy, and an invariant that the parsed
+// URL pathname is exactly the bucket prefix plus the path. See path.ts for why
+// they are separate, and path.test.ts for the proof.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { checkPath, uploadTarget } from "./path.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("method", { status: 405 });
@@ -41,12 +46,16 @@ Deno.serve(async (req: Request) => {
     if (error || ok !== true) return new Response("forbidden", { status: 403 });
   }
 
+  // SB-506: validate before anything is read or sent.
   const url = new URL(req.url);
-  const path = url.searchParams.get("path");
-  if (!path) return new Response("no path", { status: 400 });
+  const check = checkPath(url.searchParams.get("path"));
+  if (!check.ok) return new Response(check.reason, { status: 400 });
+  const path = check.path;
+  const target = uploadTarget(SUPABASE_URL, path);
+  if (!target) return new Response("invalid path", { status: 400 });
   const body = new Uint8Array(await req.arrayBuffer());
   const ct = req.headers.get("content-type") || "image/png";
-  const up = await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets/${path}`, {
+  const up = await fetch(target, {
     method: "POST",
     headers: { "Authorization": "Bearer " + SR, "apikey": SR, "Content-Type": ct, "x-upsert": "true" },
     body,
