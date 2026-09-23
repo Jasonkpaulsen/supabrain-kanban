@@ -1,6 +1,6 @@
 # Edge function sources
 
-Ten edge functions are ACTIVE on `hzqqvbvhnzmgqivfigej`. Nine of them have their
+Ten edge functions are ACTIVE on `hzqqvbvhnzmgqivfigej`. All ten have their
 source here. This file records where that source came from, what has been
 checked, and — more usefully — what has **not**.
 
@@ -17,32 +17,32 @@ checked, and — more usefully — what has **not**.
 | `generate-memory-embeddings` | v2 | false | yes | SB-501 |
 | `search-skills` | v2 | false | yes | SB-501 |
 | `test-key` | v9 | **true** | yes | SB-501 |
-| `lce-image-ingest` | v1 | false | **no — see below** | blocked on SB-497 |
+| `lce-image-ingest` | v2 | false | yes | SB-497 |
 
 Before SB-501 the default branch carried **no** `supabase/functions/` directory
 at all; the three earlier captures existed only on unmerged feature branches.
 
-## `lce-image-ingest` is deliberately absent
+## `lce-image-ingest`: closed 2026-09-23
 
-Its deployed source declares its auth token as a literal constant. Committing it
-verbatim would publish a live credential to a **public** repository — which is
-precisely SB-440, the incident that caused the scanner in `scripts/` to exist.
+This section previously recorded why the function was **absent**: its deployed
+source declared its auth token as a literal, so committing it verbatim would
+have republished a live credential to a public repository — SB-440 exactly —
+while committing it redacted would have produced a file that no longer matched
+what runs. Both are wrong, so the ordering was forced: rotate first, capture
+second.
 
-The two ways to cover it are both wrong today:
+SB-497 did that. The token now lives in Vault, the function asks
+`public.lce_image_ingest_token_matches()` and holds nothing, and the redeployed
+v2 source carries no secret — so it is captured here like the rest.
 
-- commit it as-is → republish the credential;
-- commit it with the literal edited out → the file no longer matches what runs,
-  which reads as coverage while being false. That is worse than an absent file,
-  because an absent file is honestly absent.
+Verified by measurement, not inference: old token → **403**, the Vault token →
+**400 `no path`** (through the gate, stopped before any upload), garbage → 403,
+and no `x-token` header at all → 403. The probes deliberately omitted `?path`
+so a successful authentication could not write anything; the bucket still holds
+13 objects with the most recent dated 2026-06-28.
 
-So the order is forced: **SB-497 moves that token out of source first**
-(the `*_token_matches()` Vault pattern already used by `lce-cleanup`,
-`agent-runner` and `supabrain-sweep`), the function is redeployed, and the
-redeployed source — which by then holds no secret — is captured here. Until
-then this table says `no` on purpose.
-
-`scripts/secret-scan.py` enforces this rather than trusting anyone to remember:
-a commit reintroducing that shape is refused.
+`scripts/secret-scan.py` still refuses the old shape, so a commit reintroducing
+a literal token here is blocked rather than trusted to review.
 
 ## How these were captured, and the limit of it
 
@@ -85,6 +85,7 @@ Recorded at capture (2026-09-23), `sha256` truncated to 16 hex chars:
 | `generate-memory-embeddings` | `af5062453db5f793` | 3563 | 62 |
 | `generate-skill-embeddings` | `140b39cbd4d442d6` | 4388 | 156 |
 | `lce-cleanup` | `25ac19af2ec7b471` | 5074 | 83 |
+| `lce-image-ingest` | `0e488edf95780a45` | 2943 | 60 |
 | `search-skills` | `90e00d061e3ee120` | 3109 | 107 |
 | `supabrain-sweep` | `132d9efbd544ca8f` | 16428 | 365 |
 | `test-key` | `1ae26f5d41034cf4` | 833 | 20 |
@@ -102,9 +103,10 @@ Byte counts and character counts differ wherever a file uses em dashes or
 arrows — several of these do. Compare the checksum, not `wc -c`. (CLSRM-34
 recorded that exact false positive on day one.)
 
-## Two observations recorded, not fixed here
+## Three observations recorded, not fixed here
 
-Neither is in SB-501's scope; both were found while reading these sources.
+None is in the scope of the ticket that found it; all three came from reading
+these sources rather than from review of a change.
 
 1. **`search-skills` and `generate-skill-embeddings` accept an API key in the
    request body** — `Deno.env.get("OPENAI_API_KEY") || body.openai_api_key` —
@@ -114,6 +116,15 @@ Neither is in SB-501's scope; both were found while reading these sources.
    2026-04-19, asks for it to be deleted from the dashboard. It is the only one
    of the ten with `verify_jwt=true`, so the stub is not publicly callable, but
    a retired function that is still deployed is still an endpoint.
+3. **`lce-image-ingest` interpolates a caller-supplied `path` into the storage
+   URL, and `..` escapes the bucket** (SB-506). `../avatars/x.png` normalises to
+   `/storage/v1/object/avatars/x.png`; percent-encoded `..%2F` does not. Verified
+   by URL normalisation, not exploited. Severity today is bounded: it is
+   token-gated, and exactly one bucket exists, so there is nothing to escape
+   into. It is latent — it activates the moment a second bucket is created.
+   Deliberately not fixed in SB-497, because changing the accepted path shape in
+   the same deployment as a credential rotation would make any breakage
+   impossible to attribute to one or the other.
 
 ## Deployment
 
