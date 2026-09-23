@@ -56,9 +56,26 @@ RULES = [
         id="HEADER_TOKEN_LITERAL",
         incident="SB-440 (agent-runner token in a committed migration), SB-493 (lce-cleanup token in cron.job.command)",
         why="A credential written as the value of an auth header, in SQL or TypeScript.",
-        # "x-token":"VALUE"  |  'x-token': 'VALUE'  |  x-token = "VALUE"
+        # "x-token":"VALUE"  |  'x-token': 'VALUE'  |  x-token = "VALUE"  |  "x-token", "VALUE"
+        #
+        # SB-501: the comma separator used to accept a BARE key, so any identifier
+        # matching CRED_KEY followed by a comma claimed the next quoted string as its
+        # value. In TypeScript that reads
+        #     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+        # as the credential `anthropic-version`, because `apiKey` matches api[-_]?key
+        # and the comma after it is a separator, not an assignment. That fired on the
+        # real deployed agent-runner source the first time this scanner was pointed at
+        # it. A false positive on a blocking gate is not cosmetic: the prescribed fix
+        # is to allowlist, and a reviewer who has allowlisted this once will allowlist
+        # the next one without reading it.
+        #
+        # The comma form is real, but only as a quoted PAIR ("x-token", "VALUE") —
+        # the SQL/array shape. It now requires the key to be quoted on both sides;
+        # the assignment forms (: := =) still accept a bare key.
         pattern=re.compile(
-            r"""["']?\b""" + CRED_KEY + r"""\b["']?\s*(?::|:=|=|,)\s*["']([^"'\n]{8,})["']""",
+            r"""(?:["']\b""" + CRED_KEY + r"""\b["']\s*,\s*"""
+            r"""|["']?\b""" + CRED_KEY + r"""\b["']?\s*(?::|:=|=)\s*)"""
+            r"""["']([^"'\n]{8,})["']""",
             re.I,
         ),
         group=1,
@@ -314,6 +331,12 @@ POSITIVES = [
     ("A base64 token pasted bare into a migration (must survive the UUID tightening)",
      "supabase/migrations/w.sql",
      """select set_config('app.tok', 'k3Jx9QvZb2Rt7mLpW1yE4aNcH8sUdF6gTyQwErTz', false);"""),
+    # SB-501: the comma branch of HEADER_TOKEN_LITERAL was narrowed to require a
+    # QUOTED key. This pins the form that narrowing must not lose -- the SQL/array
+    # pair -- so the branch cannot be quietly deleted as dead. Its partner negative
+    # is "a cred-named variable followed by a comma is not an assignment".
+    ("SB-501: quoted key/value pair separated by a comma", "supabase/migrations/v.sql",
+     """perform net.http_post(url, '{"x-token", "aK9x2Lm4Qv7ZbR1tE5yW"}'::jsonb);"""),
 ]
 
 NEGATIVES = [
@@ -343,6 +366,17 @@ NEGATIVES = [
      """insert into projects (id) values ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5');"""),
     ("A snake_case identifier literal", "supabase/migrations/f.sql",
      """where check_name = 'anon_exposure_detected_today';"""),
+    # SB-501: found by pointing the scanner at the real deployed agent-runner source
+    # while putting it under version control. `apiKey` matches api[-_]?key, and the
+    # comma after it used to count as an assignment separator, so the rule reported
+    # the credential `anthropic-version` -- the NEXT header's name. Verbatim from
+    # supabase/functions/agent-runner/index.ts. A cred-named variable followed by a
+    # comma is not an assignment.
+    ("SB-501: a cred-named variable, then a comma, is not an assignment",
+     "supabase/functions/f/index.ts",
+     '''headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },'''),
+    ("SB-501: the same shape with a bare key and a following header", "supabase/functions/f/index.ts",
+     '''const h = { apikey: SR, "x-upsert": "true" };'''),
 ]
 
 
