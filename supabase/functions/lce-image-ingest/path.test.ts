@@ -88,6 +88,17 @@ test("length boundary", () => {
   assert.equal(checkPath(atMax + "x").ok, false);
 });
 
+test("the cap is the documented 512, not merely 'whatever the constant says'", () => {
+  // QA, SB-506: the test above derives its inputs FROM MAX_PATH_LEN, so it
+  // proves the boundary is enforced wherever the constant sits -- and silently
+  // follows it if someone raises it. Mutation M9 (512 -> 4096) survived it.
+  // The commit, README and ticket all state 512; pin that number with
+  // literals that do not come from the module under test.
+  assert.equal(MAX_PATH_LEN, 512);
+  assert.equal(checkPath("a".repeat(508) + ".png").ok, true);  // 512
+  assert.equal(checkPath("a".repeat(509) + ".png").ok, false); // 513
+});
+
 test("'...' is an ordinary name, not traversal -- accepted and unrewritten", () => {
   // Only "." and ".." are special to URL parsing. Pinned so nobody "fixes"
   // the regex into refusing all dots and breaks real extensions.
