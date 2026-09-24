@@ -8,7 +8,7 @@ checked, and — more usefully — what has **not**.
 
 | Function | Deployed | `verify_jwt` | Source here | Captured under |
 |---|---|---|---|---|
-| `family-codex-mcp` | v3 | false | yes | SB-411 |
+| `family-codex-mcp` | v4 | false | yes | SB-411, SB-182 |
 | `lce-cleanup` | v2 | false | yes | SB-493 |
 | `supabrain-sweep` | v3 | false | yes | SB-482 |
 | `agent-runner` | v10 | false | yes | SB-501 |
