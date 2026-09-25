@@ -9,6 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>JARVIS</title>
 <link rel="manifest" href="manifest.json">
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -502,8 +503,8 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 </div>
 
 <script>
-var SB_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
-var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+var SB_URL=window.SB_CONFIG.url;   // SB-182: see config.js
+var SB_KEY = window.SB_CONFIG.key;
 var sb=window.supabase.createClient(SB_URL,SB_KEY);
 var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28',gambling:'#f85149','prediction-markets':'#f85149'};
 var DL_FALLBACK=['products','business','career','property','operations','family','hobbies','club','gambling'];
