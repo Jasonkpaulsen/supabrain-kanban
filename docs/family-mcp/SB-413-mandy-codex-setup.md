@@ -30,7 +30,8 @@ available (otherwise in a file under `~/.codex`).
 with a redirect-URI mismatch.
 
 1. Supabase dashboard → project `hzqqvbvhnzmgqivfigej`.
-2. **Authentication → OAuth Server → Clients** → `Mandy — Codex Family Data MCP (v1)`.
+2. **Authentication → OAuth Server → Clients** → `Mandy — Codex Family Data MCP`
+   (client ID `ab31fe36-418f-44fe-b822-a6ea2c39e74b`).
    (Not the organisation-level *OAuth Apps* page — that is for the Management API.)
 3. Add this redirect URI, exactly:
 

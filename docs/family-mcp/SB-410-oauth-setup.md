@@ -3,9 +3,10 @@
 > **Completed 2026-09-08 — kept as a record.** To connect Mandy's computer, use
 > [`SB-413-mandy-codex-setup.md`](SB-413-mandy-codex-setup.md), not this page.
 >
-> What was actually configured differs from the steps below in three places:
+> What was actually configured differs from the steps below in four places:
 > Site URL is the bare origin `https://jasonkpaulsen.github.io` with Authorization Path
-> `/supabrain-kanban/oauth-consent.html`; the client is
+> `/supabrain-kanban/oauth-consent.html`; the client was registered as
+> `Mandy — Codex Family Data MCP`, without the "(v1)" in step 4; it is
 > `ab31fe36-418f-44fe-b822-a6ea2c39e74b` with loopback redirect
 > `http://127.0.0.1:5555/callback` (RFC 8252 native-app loopback, despite step 7 below);
 > and current Codex also needs `http://127.0.0.1:5555/callback/8Oa9VOcPQmPU` registered —
