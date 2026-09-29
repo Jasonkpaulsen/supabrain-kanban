@@ -10,7 +10,7 @@ checked, and — more usefully — what has **not**.
 |---|---|---|---|---|
 | `family-codex-mcp` | v4 | false | yes | SB-411, SB-182 |
 | `lce-cleanup` | v2 | false | yes | SB-493 |
-| `supabrain-sweep` | v3 | false | yes | SB-482 |
+| `supabrain-sweep` | v4 | false | yes | SB-482, SB-495 |
 | `agent-runner` | v10 | false | yes | SB-501 |
 | `analyze-image` | v11 | false | yes | SB-501 |
 | `generate-skill-embeddings` | v7 | false | yes | SB-501 |
@@ -88,12 +88,14 @@ Recorded at capture (2026-09-23), `sha256` truncated to 16 hex chars:
 | `lce-image-ingest` | `3e161930acc90bdf` | 3385 | 69 |
 | `lce-image-ingest/path.ts` | `202ae0b293706998` | 3052 | 62 |
 | `search-skills` | `90e00d061e3ee120` | 3109 | 107 |
-| `supabrain-sweep` | `132d9efbd544ca8f` | 16428 | 365 |
+| `supabrain-sweep` | `a6dd10bbd915e59d` | 19725 | 423 |
+| `supabrain-sweep/params.ts` | `b73b00117766b89a` | 8178 | 195 |
 | `test-key` | `1ae26f5d41034cf4` | 833 | 20 |
 
-`lce-image-ingest` is the only multi-file function: `index.ts` imports
-`path.ts`, and both are deployed. `path.test.ts` sits beside them and is NOT
-deployed -- it runs in CI (`.github/workflows/function-tests.yml`).
+Two functions are multi-file. `lce-image-ingest/index.ts` imports `path.ts`,
+and `supabrain-sweep/index.ts` imports `params.ts` (SB-495, v4); both files of
+each are deployed. The `*.test.ts` files beside them are NOT deployed -- they
+run in CI (`.github/workflows/function-tests.yml`).
 
 Regenerate and compare:
 

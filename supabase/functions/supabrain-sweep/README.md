@@ -49,11 +49,45 @@ else changes — the function reads it by name on every request.
 ## Calling it
 
 ```jsonc
-{"describe": true}                                  // list operations and bundles
+{"describe": true}                                  // list operations, bundles and each operation's parameters
 {"bundle": "pm-triage-dispatch"}                    // run a named bundle
 {"bundle": "process-engineer-daily", "dryRun": true} // skip everything that mutates
 {"operations": ["stale_wip"], "params": {"staleDays": 7}}
+{"operations": ["backlog_grooming_report", "stale_wip"],
+ "params": {"stale_wip": {"staleDays": 2}}}          // per operation, when a name is ambiguous
 ```
+
+### Parameters (SB-495)
+
+Each operation declares its parameters and what each one means (`describe`
+lists them). Parameters can be given flat, `{"staleDays": 7}`, or per operation,
+`{"stale_wip": {"staleDays": 7}}`. A per-operation value overrides a flat one.
+
+A flat name is accepted only when every operation in the call that reads it
+means the same thing by it. `staleDays` is "days a backlog item has gone
+untouched" (default 45) to `backlog_grooming_report` but "days open work has
+gone untouched" (default 3) to `stale_wip` and `blocked_items`. So
+`{"operations":["backlog_grooming_report","stale_wip"],"params":{"staleDays":2}}`
+is refused with a `400` naming both meanings. Before SB-495 it was accepted and
+quadrupled the grooming report (195 items against its default 54).
+
+Also refused with a `400`, where v3 silently fell back to the default:
+
+- a parameter no operation in the call reads (a typo such as `staleday`);
+- a non-numeric value;
+- a per-operation block for an operation that is not in the call.
+
+Out-of-range numbers are still clamped to the operation's range. The response's
+`params_used` shows the effective values, so a clamp is visible.
+
+### Truncation (SB-495)
+
+Every list read asks the database for its exact count of matching rows, so a
+result cut short by a limit (500 rows, or 5000 on the per-agent work-item scan)
+or by the API's own row cap reports `truncated: true` with the real `total`.
+The response lists any such operation in a top-level `truncated` array with a
+`warning`, and `complete` is `true` only when nothing failed and nothing was
+cut short. `ok` keeps its old meaning: no operation failed.
 
 From SQL (this is how `pg_cron` would call it, and the token never leaves the
 database):
@@ -82,7 +116,23 @@ than a 500.
 
 The four `process-engineer-daily` operations are existing SECURITY DEFINER
 functions granted to `service_role` only. This endpoint calls them; it does not
-reimplement them.
+reimplement them. All four write, so a `dryRun` of that bundle runs nothing.
+`backlog_grooming_report` was declared read-only until SB-495, but the database
+function inserts an `activity_log` row on every call, so a dry run wrote one.
+
+## Tests
+
+`params.test.ts` tests the parameter resolver and the truncation check in
+`params.ts`, the module that ships. It includes the architect's reproduction as
+its first case. CI runs it through `.github/workflows/function-tests.yml`.
+Locally:
+
+```sh
+node --experimental-strip-types --test supabase/functions/supabrain-sweep/params.test.ts
+```
+
+Deploy `index.ts` and `params.ts` together, with `verify_jwt` off. The test file
+is not deployed.
 
 ## A defect this found in itself
 
