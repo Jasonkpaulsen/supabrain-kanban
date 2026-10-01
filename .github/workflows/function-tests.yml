@@ -28,13 +28,15 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Run edge function tests
+      - name: Run edge function and repo unit tests
         run: |
-          mapfile -t FILES < <(find supabase/functions -name '*.test.ts' | sort)
+          # tests/unit holds source-level checks on the static pages (SB-091);
+          # tests/e2e is Playwright's and is not run here.
+          mapfile -t FILES < <(find supabase/functions tests/unit -name '*.test.ts' | sort)
           # A runner that finds nothing reports success. ADR-TEST-002: a check
           # that cannot fail is not a check, so finding zero files is a failure.
           if [ "${#FILES[@]}" -eq 0 ]; then
-            echo "::error::no *.test.ts files found under supabase/functions -- refusing to report green"
+            echo "::error::no *.test.ts files found under supabase/functions or tests/unit -- refusing to report green"
             exit 1
           fi
           printf 'test file: %s\n' "${FILES[@]}"

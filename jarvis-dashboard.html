@@ -462,7 +462,7 @@ var SUPABASE_URL = window.SB_CONFIG.url;   // SB-182: see config.js
 var SUPABASE_KEY = window.SB_CONFIG.key;
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', gambling:'#f85149', 'prediction-markets':'#f85149' };
+var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', 'prediction-markets':'#f85149' };
 /* SB-353 — the status palette as data. These values already existed in three
    places in the stylesheet (.col-* .column-title, .ac-bar .b-*, the old
    .status-badge variants); the card badge needs them at runtime to colour all
@@ -470,7 +470,7 @@ var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', 
    Kept identical to jarvis-pwa.html:506-507 so the two surfaces cannot drift. */
 var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950' };
 var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done' };
-var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club'];
 var DOMAIN_LIST = DOMAIN_LIST_FALLBACK; // overridden dynamically from briefing data
 var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
 
