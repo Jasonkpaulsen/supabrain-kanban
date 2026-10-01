@@ -284,9 +284,31 @@ def read_staged(rel: str) -> str | None:
     return r.stdout.decode("utf-8", errors="replace")
 
 
+def display_name(p: Path) -> str:
+    """Repo-relative for files in the repo, absolute for anything outside it.
+
+    SB-505: this used to be a bare p.relative_to(ROOT), which raises for a file
+    outside the repo. The traceback exited 1 -- the same code as "found a
+    credential" -- so a scan that never read the file looked like the gate
+    working.
+    """
+    try:
+        return str(p.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(p.resolve())
+
+
 def files_to_scan(only: list[str] | None) -> list[Path]:
     if only:
-        return [ROOT / f for f in only if (ROOT / f).is_file()]
+        # SB-505: a named file that is missing used to be dropped here without
+        # a word, and the run reported "clean (0 files)". It is now recorded so
+        # main() can exit EXIT_UNSCANNABLE instead of passing.
+        named, missing = [], []
+        for f in only:
+            p = Path(f) if Path(f).is_absolute() else ROOT / f
+            (named if p.is_file() else missing).append(p)
+        files_to_scan.unscannable = [display_name(p) for p in missing]
+        return named
     found, skipped = [], 0
     for p in ROOT.rglob("*"):
         if not p.is_file():
@@ -306,6 +328,11 @@ def files_to_scan(only: list[str] | None) -> list[Path]:
 
 
 files_to_scan.skipped_for_extension = 0
+files_to_scan.unscannable = []
+
+# Exit codes. "Could not scan" must never share a code with "found a
+# credential" (SB-505) or with "clean".
+EXIT_CLEAN, EXIT_FINDING, EXIT_UNSCANNABLE = 0, 1, 2
 
 
 # --------------------------------------------------------------------------
@@ -465,6 +492,44 @@ def staged_integration_test() -> tuple[int, int]:
     return ran, bad
 
 
+def cli_path_test() -> tuple[int, int]:
+    """SB-505: named paths that are outside the repo, or missing.
+
+    Drives the real script as a subprocess and asserts on the exit code, which
+    is what CI and the hook read. An outside file crashed (exit 1, as if a
+    credential had been found), and a missing one reported "clean" (exit 0).
+    Neither had been read.
+    """
+    import tempfile
+    secret = 'const TOKEN = "Nx7Qv2ZbK4tR9mLpW1yE";\n'
+    clean = 'const cfg = { name: "clean" };\n'
+    ran = bad = 0
+
+    def run(*paths):
+        return subprocess.run([sys.executable, str(Path(__file__).resolve()), *paths],
+                              cwd=ROOT, capture_output=True, text=True).returncode
+
+    with tempfile.TemporaryDirectory() as tmp:
+        outside_secret = Path(tmp) / "outside-secret.ts"
+        outside_clean = Path(tmp) / "outside-clean.ts"
+        outside_secret.write_text(secret)
+        outside_clean.write_text(clean)
+        missing = Path(tmp) / "never-written.ts"
+        cases = [
+            ("credential in a file outside the repo is caught", [str(outside_secret)], EXIT_FINDING),
+            ("clean file outside the repo passes", [str(outside_clean)], EXIT_CLEAN),
+            ("missing named file is 'could not scan', not clean", [str(missing)], EXIT_UNSCANNABLE),
+            ("credential still wins over a missing file", [str(outside_secret), str(missing)], EXIT_FINDING),
+        ]
+        for name, paths, want in cases:
+            rc = run(*paths); ran += 1
+            ok = rc == want
+            bad += 0 if ok else 1
+            print(f"  [{'ok   ' if ok else 'WRONG'}] {name} -> exit {rc}"
+                  + ("" if ok else f"   <-- expected {want}"))
+    return ran, bad
+
+
 def self_test() -> int:
     allow = {}
     bad = 0
@@ -483,12 +548,15 @@ def self_test() -> int:
     print("\nStaged-index cases -- do we judge the bytes git will commit? (SB-496):")
     int_ran, int_bad = staged_integration_test()
     bad += int_bad
+    print("\nNamed-path cases -- outside the repo, or missing (SB-505):")
+    cli_ran, cli_bad = cli_path_test()
+    bad += cli_bad
     print()
     if bad:
         print(f"SELF-TEST FAILED: {bad} case(s) wrong. The scanner is not trustworthy; fix it before trusting a clean scan.")
         return 1
     print(f"SELF-TEST PASSED: {len(POSITIVES)} incidents caught, {len(NEGATIVES)} clean forms "
-          f"not flagged, {int_ran} staged-index case(s) correct.")
+          f"not flagged, {int_ran} staged-index case(s) and {cli_ran} named-path case(s) correct.")
     return 0
 
 
@@ -529,16 +597,25 @@ def main() -> int:
             findings += scan_text(rel, text, allow, new_lines_only=True)
     else:
         for p in files_to_scan(only):
-            rel = str(p.relative_to(ROOT))
+            rel = display_name(p)
             try:
                 text = p.read_text(errors="replace")
             except OSError:
+                files_to_scan.unscannable.append(rel)
                 continue
             scanned += 1
             findings += scan_text(rel, text, allow, new_lines_only=new_lines)
 
     blocking = [f for f in findings if f["blocking"]]
     advisory = [f for f in findings if not f["blocking"]]
+    unscannable = files_to_scan.unscannable
+
+    if unscannable:
+        # Printed before any verdict, so a reader of either outcome sees it.
+        print(f"secret-scan: COULD NOT SCAN {len(unscannable)} named file(s) -- missing or unreadable:")
+        for u in unscannable:
+            print(f"  {u}")
+        print("  Nothing was read from these paths, so this run says nothing about them.\n")
 
     if advisory:
         by_rule: dict[str, int] = {}
@@ -551,13 +628,19 @@ def main() -> int:
         print("  state. This rule blocks only on newly added lines.\n")
 
     if not blocking:
+        if unscannable:
+            # A credential would still win (exit 1, below); with none found,
+            # an unread file is an error, not a pass.
+            print(f"secret-scan: {scanned} file(s) scanned clean, but {len(unscannable)} named file(s) "
+                  f"could not be scanned. Exit {EXIT_UNSCANNABLE}.")
+            return EXIT_UNSCANNABLE
         extra = ""
         if not args.staged and files_to_scan.skipped_for_extension:
             extra = (f", {files_to_scan.skipped_for_extension} skipped for extension"
                      f" (SCAN_EXT is an allowlist)")
         src = "staged" if args.staged else "files"
         print(f"secret-scan: clean ({scanned} {src}, {len(allow)} allowlisted value(s){extra}).")
-        return 0
+        return EXIT_CLEAN
 
     findings = blocking
     print(f"secret-scan: {len(findings)} blocking finding(s).\n")
@@ -571,7 +654,7 @@ def main() -> int:
         print(f"             Do not widen the rule, and do not paste the value itself.\n")
     print("Refusing the commit. A credential in this repository is public the moment it is pushed;")
     print("rotate anything that has already been exposed rather than deleting it quietly.")
-    return 1
+    return EXIT_FINDING
 
 
 if __name__ == "__main__":
