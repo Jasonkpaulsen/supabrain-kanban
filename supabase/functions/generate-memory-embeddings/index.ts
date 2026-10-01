@@ -32,8 +32,9 @@ Deno.serve(async (req: Request) => {
       return new Response("ok", { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization" }});
     }
     const body = await req.json().catch(() => ({}));
-    const openaiKey = Deno.env.get("OPENAI_API_KEY") || body.openai_api_key;
-    if (!openaiKey) return new Response(JSON.stringify({ error: "No OpenAI API key found." }), { status: 400, headers: { "Content-Type": "application/json" } });
+    // SB-503: server-side secret only; a key in the request body is ignored.
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!openaiKey) return new Response(JSON.stringify({ error: "Server misconfigured: OPENAI_API_KEY is not set." }), { status: 500, headers: { "Content-Type": "application/json" } });
 
     const targetId = body.memory_id || null;
     const limit = Math.min(body.limit || 200, 300);

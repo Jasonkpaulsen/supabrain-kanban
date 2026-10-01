@@ -13,9 +13,9 @@ checked, and — more usefully — what has **not**.
 | `supabrain-sweep` | v4 | false | yes | SB-482, SB-495 |
 | `agent-runner` | v10 | false | yes | SB-501 |
 | `analyze-image` | v11 | false | yes | SB-501 |
-| `generate-skill-embeddings` | v7 | false | yes | SB-501 |
-| `generate-memory-embeddings` | v2 | false | yes | SB-501 |
-| `search-skills` | v2 | false | yes | SB-501 |
+| `generate-skill-embeddings` | v8 | false | yes | SB-501, SB-503 |
+| `generate-memory-embeddings` | v3 | false | yes | SB-501, SB-503 |
+| `search-skills` | v3 | false | yes | SB-501, SB-503 |
 | `test-key` | v9 | **true** | yes | SB-501 |
 | `lce-image-ingest` | v3 | false | yes | SB-497, SB-506 |
 
@@ -82,12 +82,12 @@ Recorded at capture (2026-09-23), `sha256` truncated to 16 hex chars:
 | `agent-runner` | `8edf743413fcfa63` | 17013 | 306 |
 | `analyze-image` | `ff6a76e8737c6fbe` | 9009 | 254 |
 | `family-codex-mcp` | `28ca14d0c70a4a45` | 44666 | 698 |
-| `generate-memory-embeddings` | `af5062453db5f793` | 3563 | 62 |
-| `generate-skill-embeddings` | `140b39cbd4d442d6` | 4388 | 156 |
+| `generate-memory-embeddings` | `73ebe3005da005c4` | 3642 | 63 |
+| `generate-skill-embeddings` | `ea80a40e736e4697` | 4517 | 158 |
 | `lce-cleanup` | `25ac19af2ec7b471` | 5074 | 83 |
 | `lce-image-ingest` | `3e161930acc90bdf` | 3385 | 69 |
 | `lce-image-ingest/path.ts` | `202ae0b293706998` | 3052 | 62 |
-| `search-skills` | `90e00d061e3ee120` | 3109 | 107 |
+| `search-skills` | `a63f789850f1cdcc` | 3290 | 110 |
 | `supabrain-sweep` | `a6dd10bbd915e59d` | 19725 | 423 |
 | `supabrain-sweep/params.ts` | `b73b00117766b89a` | 8178 | 195 |
 | `test-key` | `1ae26f5d41034cf4` | 833 | 20 |
@@ -114,13 +114,16 @@ recorded that exact false positive on day one.)
 ## Three observations recorded at capture
 
 None was in the scope of the ticket that found it; all three came from reading
-these sources rather than from review of a change. The third has since been
-fixed; the first two remain open as SB-503 and SB-504.
+these sources rather than from review of a change. The first and third have
+since been fixed; the second remains open as SB-504.
 
-1. **`search-skills` and `generate-skill-embeddings` accept an API key in the
-   request body** — `Deno.env.get("OPENAI_API_KEY") || body.openai_api_key` —
-   on endpoints with `verify_jwt=false`. A caller-supplied credential on an
-   unauthenticated endpoint means the key reaches the platform's request logs.
+1. ~~**`search-skills` and `generate-skill-embeddings` accept an API key in the
+   request body**~~ **Resolved by SB-503, 2026-10-01** (`generate-memory-embeddings`
+   had the same fallback and was fixed too). All three read `OPENAI_API_KEY` from
+   the server-side secret only and return 500 when it is missing, instead of
+   falling open to a caller's key. A caller audit came first: the memory and
+   skill triggers send only an id, and no cron job, prompt or skill passes a key.
+   `_tests/openai-key-source.test.ts` fails CI if a body-key fallback returns.
 2. **`test-key` is a 410 Gone stub that is still ACTIVE.** Its own comment, from
    2026-04-19, asks for it to be deleted from the dashboard. It is the only one
    of the ten with `verify_jwt=true`, so the stub is not publicly callable, but

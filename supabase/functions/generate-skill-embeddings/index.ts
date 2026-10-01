@@ -69,12 +69,14 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
 
-    // Use env var first, fall back to request body
-    const openaiKey = Deno.env.get("OPENAI_API_KEY") || body.openai_api_key;
+    // SB-503: the key comes from the server-side secret only. A key in the
+    // request body is ignored: secrets that travel in bodies end up in logs, and
+    // a body fallback made a missing secret fail open to caller-supplied keys.
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiKey) {
       return new Response(
-        JSON.stringify({ error: "No OpenAI API key found. Set OPENAI_API_KEY secret or pass openai_api_key in body." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Server misconfigured: OPENAI_API_KEY is not set." }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
