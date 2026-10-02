@@ -1,3 +1,8 @@
 node_modules/
 test-results/
 playwright-report/
+supabase/.temp/
+
+# SB-446: the scanner imports cleanly for its self-test; keep bytecode out of the repo.
+__pycache__/
+*.pyc
