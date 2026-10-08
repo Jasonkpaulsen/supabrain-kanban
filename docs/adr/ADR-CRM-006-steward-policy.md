@@ -152,6 +152,54 @@ Rows added to the kept person after the merge stay where they are.
 - An undone automatic merge counts as a wrong merge for the QA suspension threshold (SB-575).
   This is read from `crm_unmerges` joined to `crm_steward_decisions.merge_log_id`.
 
+### 4.2 The steward run (SB-573)
+
+`crm_steward_run(p_dry_run boolean default false, p_limit int default 200)` returns a summary
+as jsonb. It runs as the owner (SECURITY INVOKER, RLS).
+
+**Phases, in this order.** Each phase only sees what the earlier ones left:
+1. **Resolve import conflicts** by the §5 table. Tier A against Tier A stays open. A
+   `took_incoming` resolution stamps `meta.confirmed_by = 'policy:auto_resolve'` on the row it
+   wrote. Same-tier birthdays keep the existing value: a newer date is not more likely right.
+2. **Auto-merge** pairs from `crm_duplicate_candidates(1000)` that meet the §4 rule. Rule (a)
+   uses email or phone only; handles do not count. Keeper order as in §4. Each merge is one
+   `auto_merge` decision carrying its `merge_log_id`. A merge that raises is skipped and
+   counted; it never stops the run. Skipped entirely while auto-merge is suspended.
+3. **Dismiss gray-zone pairs.** A `possible` candidate qualifies when:
+   - it has no shared organization, group or relationship;
+   - both people were created at least 30 days ago.
+   The pair is dismissed with `crm_dismiss_duplicate(…, 'auto_dismiss_gray_zone')` and logged
+   as `auto_dismiss`. Pairs that do share context are left for the digest.
+4. **Confirm.**
+   - `tier_a`: Tier A people not yet confirmed.
+   - `tier_b_14d`: Tier B people captured at least 14 days ago with no open import conflict and
+     no duplicate candidate.
+   - `tier_c_corroborated`: Tier C facts whose fact type and value also appear on the same
+     person from a different source.
+   All three go through `crm_policy_confirm_person`, which now also takes `tier_b_14d` and
+   re-checks its conditions itself.
+5. **Expire.** Tier C facts and interactions that are still unconfirmed 60 days after capture
+   are archived (`auto_expire`). Restricted rows are never touched by any phase.
+
+**Bounds and switches:**
+- **Per-run limit:** at most `p_limit` decisions, capped at 200; the summary says when the cap
+  was hit.
+- **Kill switch:** a non-dry run needs an active agent named `CRM Data Steward`, owned by the
+  caller, with `automation_enabled = true`. Otherwise it returns `{disabled: true}` and changes
+  nothing.
+- **Dry run:** always allowed. It does the whole run inside a savepoint, rolls it back, and
+  returns what would have happened.
+- **Suspension:** auto-merge is suspended while the newest `suspend`/`resume` row in the
+  decision log is a `suspend`.
+- **Run id:** every decision row carries the run's `run_id`.
+
+**Scheduling** belongs to the steward agent (SB-576). It calls the function daily with the
+owner's own session. No cron job calls it as `postgres`, because RLS and `auth.uid()` need a
+real owner.
+
+**Tier C scope today:** facts (corroborate and expire) and interactions (expire). The CRM has no
+Tier C contact points: calendar import never creates them, and agents propose facts.
+
 **Gray zone.** Similar names with no shared identifier (the trigram candidates of ADR-CRM-003
 §4):
 - A pair is dismissed automatically after 30 days if nothing links the two people.
