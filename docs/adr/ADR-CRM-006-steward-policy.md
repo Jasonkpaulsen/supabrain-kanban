@@ -102,11 +102,55 @@ The merge uses `crm_merge_people` unchanged, with reason code `auto_merge_contac
 **Undo is a precondition.** `crm_merge_log.moved` holds per-table **counts** today
 (ADR-CRM-003 §5), so a merge cannot be undone yet.
 - SB-572 changes `crm_merge_people` to also record the moved row ids per table
-  (`moved_ids`), and builds `crm_unmerge(merge_log_id, reason)`.
+  (`crm_merge_log.undo`, §4.1), and builds `crm_unmerge(merge_log_id, reason)`.
 - `crm_unmerge` refuses when any moved row changed after the merge.
 - Merges made before SB-572 have no ids and are not undoable. That is acceptable: none have
   been made, because the CRM was empty until this epic.
 - **The steward does not auto-merge until SB-572 is shipped.**
+
+### 4.1 Undo (SB-572)
+
+**What a merge records.** `crm_merge_people` keeps its behaviour. It also writes
+`crm_merge_log.undo` (jsonb), which holds ids, flags and row fingerprints only, no names or values:
+- `moved`: per `table.column`, the ids of the rows moved, and whether the move cleared
+  `is_preferred` to avoid a clash;
+- `kept`: per table, the ids of rows that could not move and were archived on the merged
+  person, with their archived state before the merge;
+- `filled`: the names of the person fields filled on the kept person from the merged person.
+
+The values themselves are not copied: the merged person's row still holds them.
+
+**Undo.** `crm_unmerge(merge_log_id, reason)` runs as the owner (SECURITY INVOKER, RLS) and
+undoes the merge exactly, or refuses and changes nothing.
+
+It **refuses** (`55000`) when:
+- the merge has no `undo` record;
+- the merge is already undone;
+- the kept person is archived or merged since;
+- the merged person is no longer archived as merged into the kept person;
+- any moved or kept row has changed since the merge. Each recorded row carries `fp`, the md5
+  of the row (without `updated_at`) as the merge left it. A fingerprint holds no readable
+  content and catches every change, even one made in the same transaction, where `now()`
+  does not move;
+- a filled field no longer equals the merged person's value, that is, the owner edited it.
+
+When nothing refuses, it:
+1. moves every recorded row back, restoring `is_preferred` where the merge cleared it;
+2. unarchives only the rows the merge archived;
+3. clears the filled fields;
+4. brings the merged person back as a live person (`archived = false`, `merged_into_id = null`).
+
+Rows added to the kept person after the merge stay where they are.
+
+**Records.**
+- `crm_unmerges` (append-only, one row per merge log id) records the undo: who, when, reason
+  code and counts.
+- The pair gets a `crm_duplicate_dismissals` row (`unmerged`), so neither the steward nor the
+  duplicate list proposes the same merge again.
+- Archive and unarchive are audited by the existing row triggers. `crm_audit_log`'s
+  caller-recordable actions are unchanged, so no constraint has to be dropped.
+- An undone automatic merge counts as a wrong merge for the QA suspension threshold (SB-575).
+  This is read from `crm_unmerges` joined to `crm_steward_decisions.merge_log_id`.
 
 **Gray zone.** Similar names with no shared identifier (the trigram candidates of ADR-CRM-003
 §4):
