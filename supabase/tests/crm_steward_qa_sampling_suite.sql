@@ -1,4 +1,5 @@
--- CRM steward QA sampling suite: TC-SB575-1..15 (SB-575; ADR-CRM-006 §7, SB-575 amendment).
+-- CRM steward QA sampling suite: TC-SB575-1..15 and 17 (SB-575; ADR-CRM-006 §7, SB-575 amendment).
+-- TC-SB575-16 is the regression run of the other steward suites (recorded separately).
 --
 -- Covers crm_steward_qa_sample (merges first, never twice, 7-day window for non-merges, weekly
 -- idempotency, size clamp, ticket with ids only), crm_steward_record_verdict (2% threshold over the
@@ -21,7 +22,7 @@ declare
   aid constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';   -- owner's CRM Data Steward
   sb  constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';   -- SB project
   md5_sample    constant text := '2db52bfdf26524e54c5db71795bf9b8c';
-  md5_verdict   constant text := 'cd6c690d850a0e3941f2d964f503f75e';
+  md5_verdict   constant text := '614c68654a54ae4b9b79006b46328b9d';   -- after 20261009032904 (suspend only on a wrong merge verdict)
   md5_scheduled constant text := 'bc7f874c33c447d1fcc40745dc86d9f0';
   rb  constant text := '__sb575_rollback__';
   r jsonb := '{}'::jsonb;
@@ -217,11 +218,10 @@ begin
     end;
   end;
 
-  -- ------------------------------------------------ TC-SB575-6: a resume survives a CORRECT verdict (risk probe)
-  -- Design §3 evaluates the rate inside every verdict call. After Jason resumes, the windowed rate is
-  -- still above 2% (the wrong verdict that tripped it is still in the window), so any later verdict,
-  -- even a correct one or one on a non-merge decision, would re-suspend at once. QA expects a resume
-  -- to hold until a NEW wrong merge verdict arrives.
+  -- ------------------------------------------------ TC-SB575-6: a resume survives correct verdicts and verdicts on non-merges
+  -- After Jason resumes, the wrong verdict that tripped the suspension is still in the window (rate
+  -- above 2%). Before 20261009032904 the next verdict of any kind re-suspended (QA D1). A resume must
+  -- hold until a NEW wrong merge verdict arrives.
   begin
     begin
       with x as (insert into public.crm_steward_decisions (user_id, actor_id, decision, rule, entity_type, entity_id, reason_code)
@@ -236,14 +236,51 @@ begin
       insert into public.crm_steward_decisions (decision, rule, entity_type, reason_code)
         values ('resume', 'qa_reviewed', 'crm_steward_decisions', 'qa_resume');  -- Jason resumes
       b := public.crm_steward_record_verdict(mg[2], 'correct');                   -- a correct merge verdict
-      c := public.crm_steward_record_verdict(p1, 'correct');                      -- a verdict on a non-merge
+      c := public.crm_steward_record_verdict(p1, 'correct');                      -- a correct verdict on a non-merge
+      d := public.crm_steward_record_verdict(p1, 'wrong');                        -- a wrong verdict on a non-merge
+      k := public.crm_steward_suspended()::int;
+      res := public.crm_steward_record_verdict(mg[3], 'wrong');                   -- a new wrong merge: suspends again
       r := r || jsonb_build_object('TC-SB575-6', case
              when (a->>'suspended_now')::boolean and not (b->>'suspended_now')::boolean and not (c->>'suspended_now')::boolean
-             then 'pass' else format('FAIL: after resume, a correct merge verdict re-suspended: %s; a correct non-merge verdict re-suspended: %s (rate %s)',
-                                     b->'suspended_now', c->'suspended_now', b->'wrong_merge_rate') end);
+              and not (d->>'suspended_now')::boolean and k = 0 and (b->>'wrong_merge_rate')::numeric > 0.02
+              and (res->>'suspended_now')::boolean
+             then 'pass' else format('FAIL: after resume re-suspended by: correct merge %s, correct non-merge %s, wrong non-merge %s; suspended %s (rate %s); new wrong merge suspends %s',
+                                     b->'suspended_now', c->'suspended_now', d->'suspended_now', k, b->'wrong_merge_rate', res->'suspended_now') end);
       raise exception '%', rb;
     exception when others then
       if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB575-6', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
+    end;
+  end;
+
+  -- ------------------------------------------------ TC-SB575-17: after a resume, correct verdicts slide the old wrong out; boundaries still hold
+  begin
+    begin
+      with x as (insert into public.crm_steward_decisions (user_id, actor_id, decision, rule, entity_type, entity_id, reason_code)
+                 select ua, ua, 'auto_merge', 'auto_merge_contact', 'crm_people', gen_random_uuid(), 'qa_fixture'
+                   from generate_series(1, 60) returning id, seq)
+      select array_agg(id order by seq) into mg from x;
+      perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+      set local role authenticated;
+      a := public.crm_steward_record_verdict(mg[1], 'wrong');                     -- 1/1: suspends
+      insert into public.crm_steward_decisions (decision, rule, entity_type, reason_code)
+        values ('resume', 'qa_reviewed', 'crm_steward_decisions', 'qa_resume');
+      for i in 2 .. 51 loop res := public.crm_steward_record_verdict(mg[i], 'correct'); end loop;
+      b := res;                                                                   -- m1 slid out: 0/50
+      select count(*) into n from public.crm_steward_decisions where decision = 'suspend';
+      k := public.crm_steward_suspended()::int;
+      c := public.crm_steward_record_verdict(mg[52], 'wrong');                    -- 1/50 = 2%: no suspend
+      d := public.crm_steward_record_verdict(mg[53], 'wrong');                    -- 2/50: suspends
+      select count(*) into m from public.crm_steward_decisions where decision = 'suspend';
+      r := r || jsonb_build_object('TC-SB575-17', case
+             when (a->>'suspended_now')::boolean and n = 1 and k = 0
+              and (b->>'merge_verdicts')::int = 50 and (b->>'wrong_merges')::int = 0 and not (b->>'suspended')::boolean
+              and (c->>'merge_verdicts')::int = 50 and (c->>'wrong_merges')::int = 1 and not (c->>'suspended_now')::boolean
+              and (d->>'merge_verdicts')::int = 50 and (d->>'wrong_merges')::int = 2 and (d->>'suspended_now')::boolean and m = 2
+             then 'pass' else format('FAIL: first %s; suspends during slide %s, suspended %s; after slide %s; 1/50 %s; 2/50 %s; suspends %s',
+                                     a->'suspended_now', n, k, b - 'verdict_id', c - 'verdict_id', d - 'verdict_id', m) end);
+      raise exception '%', rb;
+    exception when others then
+      if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB575-17', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
     end;
   end;
 
