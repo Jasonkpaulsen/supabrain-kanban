@@ -81,8 +81,11 @@ owner only, under RLS. SB-577 builds it with the `tier_a` policy; SB-573 adds th
 **The rule.** A pair is merged automatically only when **all** of these hold:
 1. Both people are live: not archived and not merged.
 2. Either:
-   - they share a normalized email or phone **and** their names are compatible (same
-     `family_name`, or one `name_normalized` contains the other), **or**
+   - they share a normalized email **and** their names are compatible (same `family_name`, or
+     one `name_normalized` contains the other), **or**
+   - they share a normalized phone **and** their names are compatible as above **and** their
+     given names are compatible (`crm_given_names_compatible`; SB-583: a shared phone plus the
+     same surname is two relatives as often as one person), **or**
    - their `name_normalized` values are equal **and** they share a live affiliation to the
      same organization.
 3. Neither has a `sensitive` or `highly_sensitive` fact, interaction or action (restricted data

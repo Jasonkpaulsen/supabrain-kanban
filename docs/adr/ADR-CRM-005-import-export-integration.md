@@ -120,12 +120,23 @@ audit log.
 
 1. **External id.** `(source, external_id)` already maps to a person; a merged person is
    followed through `merged_into_id`.
-2. **Unique contact match.** Exactly one live person has a normalized email or phone in the
-   record. The id is linked and counted as `linked`.
-3. **Otherwise a new person** (`source_type 'import'`, confidence 0.90, `source_ref`
-   `<source>:<label>`). If several people matched in step 2, the import does not guess: it
-   creates a new person, and the shared contact value surfaces it as a `possible_duplicate`
-   recommendation (ADR-CRM-004) for a reviewed merge (ADR-CRM-003).
+2. **Unique email match.** Exactly one live person has a normalized email in the record. The
+   id is linked and counted as `linked`.
+3. **Phone, only when no email matched.** Among the live people who share a normalized phone
+   with the record, only those whose given names are compatible
+   (`crm_given_names_compatible(crm_name_tokens(...))`: a shared token, or a 3+ letter token
+   that prefixes the other, such as alex/alexander; titles are ignored) count. Exactly one → linked.
+4. **Otherwise a new person** (`source_type 'import'`, confidence 0.90, `source_ref`
+   `<source>:<label>`). If several people matched, or a phone matched without a compatible
+   name, the import does not guess: it creates a new person, and the shared contact value
+   surfaces it as a `possible_duplicate` recommendation (ADR-CRM-004) for a reviewed merge
+   (ADR-CRM-003).
+
+> **Amended 2026-10-08 (SB-583).** Step 2 used to link on any unique email *or phone* match.
+> In the first Apple Contacts load, 3 of 26 links joined different people through a shared
+> number (an office main line, a household landline, a family number abroad). An email is
+> identity; a phone is only a clue. Acceptance replay of the 26 real records: before, 23
+> correct and 3 wrong; after, 23 correct, 0 wrong, 3 new people.
 
 ### 3.5 Field rules: additive, never destructive
 
