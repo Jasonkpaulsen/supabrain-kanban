@@ -1,7 +1,8 @@
 -- CRM steward digest suite: TC-SB574-1..14 (SB-574; ADR-CRM-006 §8, SB-574 amendment).
 --
 -- Covers crm_steward_digest (every item type from fixtures and absent otherwise; strong pairs listed
--- if and only if crm_steward_run does not merge them; no PII; read-only preview; delivery routing;
+-- if and only if crm_steward_run does not merge them; restricted pairs only where the §4 rule covers
+-- them (retest of D1, migration 20261009040647); no PII; read-only preview; delivery routing;
 -- weekly idempotency; 50-line cap) and the SB-574 changes to crm_steward_scheduled (weekly digest,
 -- immediate escalation of a failed run, de-duplicated while open, never breaking the run log).
 --
@@ -20,13 +21,13 @@ declare
   ub  constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';   -- owner
   aid constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';   -- owner's CRM Data Steward
   sb  constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';   -- SB project
-  md5_digest    constant text := 'c5272b5c8a20fd8b2f4003207aec4bbe';
+  md5_digest    constant text := '8417d6827ff8ef52299941a02d8a278d';   -- after 20261009040647 (pair loop mirrors the steward, QA D1)
   md5_scheduled constant text := '018a00808c60d53efc0c8f819bef72cc';
   md5_skill     constant text := '678af7004d3093db1a5662e353d73be6';
   rb  constant text := '__sb574_rollback__';
   r jsonb := '{}'::jsonb;
   pr jsonb; d jsonb; d2 jsonb; res jsonb; res2 jsonb;
-  n int; m int; k int; i int; fails int; st text; msg text; txt text; cmd text; tags text; tags2 text;
+  n int; m int; k int; i int; fails int; st text; msg text; txt text; cmd text; tags text; tags2 text; tags3 text; tags4 text;
   a1 uuid; b1 uuid; ag uuid; org uuid; grp uuid; rt uuid; ib uuid; ix uuid; ml uuid; dec_id uuid; vid uuid;
   c0 jsonb; c1 jsonb; epic uuid; wi public.work_items%rowtype; ar public.agent_runs%rowtype;
   wi0 int; wi1 int; runs0 int; runs1 int; ec0 int; ec1 int; esc text; esc2 text;
@@ -78,6 +79,18 @@ begin
       values ('meeting', now() - interval '1 day', 'zq restricted meeting', 'highly_sensitive', 'manual') returning id into ix;
     insert into public.crm_interaction_participants (interaction_id, person_id) values (ix, b1);
     pr := pr || jsonb_build_object('S7', jsonb_build_array(a1, b1));          -- would merge, highly sensitive interaction: restricted
+    insert into public.crm_people (display_name, given_name, family_name) values ('Wendeline Carrow', 'Wendeline', 'Carrow') returning id into a1;
+    insert into public.crm_people (display_name, given_name, family_name) values ('Bartram Oakhurst', 'Bartram', 'Oakhurst') returning id into b1;
+    insert into public.crm_contact_points (person_id, kind, value) values (a1, 'email', 'sb574-s8@zq.example'), (b1, 'email', 'sb574-s8@zq.example');
+    insert into public.crm_facts (person_id, fact_type, value, sensitivity) values (b1, 'health', 'zq restricted fixture', 'highly_sensitive');
+    pr := pr || jsonb_build_object('S8', jsonb_build_array(a1, b1));          -- restricted, but the rule would not merge it: strong_not_merged
+    insert into public.crm_people (display_name, given_name, family_name) values ('Gervase Pellow', 'Gervase', 'Pellow') returning id into a1;
+    insert into public.crm_people (display_name, given_name, family_name) values ('Lowenna Pellow', 'Lowenna', 'Pellow') returning id into b1;
+    insert into public.crm_contact_points (person_id, kind, value) values (a1, 'phone', '+15550104210'), (b1, 'phone', '+15550104210');
+    insert into public.crm_interactions (interaction_type, occurred_at, title, sensitivity, source_type)
+      values ('call', now() - interval '2 days', 'zq restricted call', 'sensitive', 'manual') returning id into ix;
+    insert into public.crm_interaction_participants (interaction_id, person_id) values (ix, a1);
+    pr := pr || jsonb_build_object('S10', jsonb_build_array(a1, b1));         -- relatives' phone + restricted: rule does not cover: strong_not_merged
     insert into public.crm_organizations (name) values ('Zq Grenfell Works') returning id into org;
     insert into public.crm_people (display_name, given_name, family_name) values ('Ottilie Grenfell', 'Ottilie', 'Grenfell') returning id into a1;
     insert into public.crm_people (display_name, given_name, family_name) values ('Ottilie Grenfell', 'Ottilie', 'Grenfell') returning id into b1;
@@ -108,6 +121,12 @@ begin
     insert into public.crm_people (display_name, given_name, family_name) values ('Ottoline Quarnby', 'Ottoline', 'Quarnby') returning id into b1;
     insert into public.crm_affiliations (person_id, organization_id) values (a1, org), (b1, org);
     pr := pr || jsonb_build_object('G5', jsonb_build_array(a1, b1));          -- same name + organization (possible): rule (b) merges
+    insert into public.crm_organizations (name) values ('Zq Lanyon Yard') returning id into org;
+    insert into public.crm_people (display_name, given_name, family_name) values ('Perpetua Lanyon', 'Perpetua', 'Lanyon') returning id into a1;
+    insert into public.crm_people (display_name, given_name, family_name) values ('Perpetua Lanyon', 'Perpetua', 'Lanyon') returning id into b1;
+    insert into public.crm_affiliations (person_id, organization_id) values (a1, org), (b1, org);
+    insert into public.crm_actions (title, person_id, sensitivity) values ('zq restricted action', b1, 'sensitive');
+    pr := pr || jsonb_build_object('G6', jsonb_build_array(a1, b1));          -- rule (b) covers it, sensitive action: restricted
     -- import conflicts: tier A vs A (item) and tier B vs A (steward resolves; no item)
     insert into public.crm_import_batches (source, format, source_label, reason_code, records_received)
       values ('vcard', 'crm.contacts.v1', 'qa', 'qa_fixture', 0) returning id into ib;
@@ -151,9 +170,9 @@ begin
                     and (e->>'person_id')::uuid = (t.value->>0)::uuid and e->>'field' = 'given_name' and e ? 'conflict_id');
     select count(*) into n from jsonb_array_elements(d->'items') e where e->>'type' in ('auto_merge_suspended', 'wrong_merge_not_undone', 'steward_health');
     r := r || jsonb_build_object('TC-SB574-1', case
-           when tags = 'S3,S4,S5' and tags2 = 'S6,S7' and replace(coalesce(msg, ''), ',G5:organization', '') = 'G1:organization,G2:group,G3:relationship'
+           when tags = 'S10,S3,S4,S5,S8' and tags2 = 'G6,S6,S7' and msg = 'G1:organization,G2:group,G3:relationship'
             and txt = 'C1' and n = 0 and (d->>'fyi_merge_count')::int = 0
-            and (d->>'item_count')::int = 9 + (case when coalesce(msg, '') ~ 'G5:' then 1 else 0 end)
+            and (d->>'item_count')::int = 12
             and (d->>'item_count')::int = jsonb_array_length(d->'items') and (d->>'over_target')::boolean = ((d->>'item_count')::int >= 5)
             and not (d->>'delivered')::boolean and d->'work_item' = 'null'::jsonb
            then 'pass' else format('FAIL: strong_not_merged [%s] restricted [%s] gray [%s] tier_a [%s] other %s count %s',
@@ -181,6 +200,13 @@ begin
     -- TC-SB574-5: the preview writes nothing
     r := r || jsonb_build_object('TC-SB574-5', case when c0 = c1 then 'pass' else format('FAIL: %s -> %s', c0, c1) end);
 
+    -- every fixture pair the digest lists, whatever the item type (taken before the steward runs)
+    select string_agg(t.key, ',' order by t.key) into tags3 from jsonb_each(pr) t
+     where t.key not in ('C1', 'C2')
+       and exists (select 1 from jsonb_array_elements(d->'items') e where e ? 'person_a'
+                    and least((e->>'person_a')::uuid, (e->>'person_b')::uuid) = least((t.value->>0)::uuid, (t.value->>1)::uuid)
+                    and greatest((e->>'person_a')::uuid, (e->>'person_b')::uuid) = greatest((t.value->>0)::uuid, (t.value->>1)::uuid));
+
     -- TC-SB574-2: strong_pair_not_merged lists exactly the strong pairs the steward does not merge
     perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
     set local role authenticated;
@@ -191,13 +217,40 @@ begin
      where t.key <> 'C1' and t.key <> 'C2' and (x.merged_into_id = y.id or y.merged_into_id = x.id);
     r := r || jsonb_build_object('TC-SB574-2', case
            when tags = 'G5,S1,S2,S9' and (res->'merges'->>'errors')::int = 0 and not (res->'merges'->>'suspended')::boolean
-           then 'pass' else format('FAIL: steward merged [%s] (expected G5,S1,S2,S9; the digest listed S3,S4,S5 as not merged and S6,S7 as restricted)', tags) end);
-    r := r || jsonb_build_object('TC-SB574-2.evidence', format('steward merged %s; digest strong_pair_not_merged S3,S4,S5; restricted S6,S7', tags));
+           then 'pass' else format('FAIL: steward merged [%s] (expected G5,S1,S2,S9; the digest listed S10,S3,S4,S5,S8 as not merged and G6,S6,S7 as restricted)', tags) end);
+    r := r || jsonb_build_object('TC-SB574-2.evidence', format('steward merged %s; digest listed %s', tags, tags3));
 
-    -- TC-SB574-3 (probe): a pair the steward merges by rule (b) is not offered to Jason as a gray-zone item
+    -- TC-SB574-3: no item names a pair the steward merges; every pair is listed xor merged (G4 neither);
+    -- restricted_blocks_merge only where the rule covers the pair: with the restricted rows archived,
+    -- a second real run merges exactly the pairs listed as restricted (G6,S6,S7) and not S8/S10.
+    select count(*) into n from jsonb_array_elements(d->'items') e
+      join public.crm_people x on x.id = (e->>'person_a')::uuid join public.crm_people y on y.id = (e->>'person_b')::uuid
+     where e ? 'person_a' and (x.merged_into_id = y.id or y.merged_into_id = x.id);
+    select string_agg(t.key, ',' order by t.key) into tags4 from jsonb_each(pr) t
+     where t.key not in ('C1', 'C2') and t.key <> all (string_to_array(coalesce(tags3, ''), ','))
+       and t.key <> all (string_to_array(coalesce(tags, ''), ','));
+    begin
+      perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+      set local role authenticated;
+      update public.crm_facts set archived = true where not archived;
+      update public.crm_actions set archived = true where not archived;
+      update public.crm_interactions set archived = true where not archived;
+      res2 := public.crm_steward_run(false);
+      reset role;
+      select string_agg(t.key, ',' order by t.key) into esc from jsonb_each(pr) t
+        join public.crm_people x on x.id = (t.value->>0)::uuid join public.crm_people y on y.id = (t.value->>1)::uuid
+       where t.key in ('S6', 'S7', 'S8', 'S10', 'G6') and (x.merged_into_id = y.id or y.merged_into_id = x.id);
+      raise exception '%', rb;
+    exception when others then
+      reset role;
+      if sqlerrm <> rb then esc := 'error ' || sqlstate; end if;
+    end;
     r := r || jsonb_build_object('TC-SB574-3', case
-           when coalesce(msg, '') !~ 'G5:' then 'pass'
-           else 'FAIL: same-name + same-organization pair G5 (strength possible) is listed as gray_zone_shared_context:organization, but crm_steward_run merges it (auto_merge_name_org)' end);
+           when n = 0 and tags3 = 'G1,G2,G3,G6,S10,S3,S4,S5,S6,S7,S8' and tags4 = 'G4' and esc = 'G6,S6,S7'
+           then 'pass' else format('FAIL: listed-and-merged %s; listed [%s]; neither listed nor merged [%s]; unrestricted re-run merged [%s] (expected G6,S6,S7)',
+                                   n, tags3, tags4, esc) end);
+    r := r || jsonb_build_object('TC-SB574-3.evidence', format('listed-and-merged %s; neither %s; restricted rows archived -> steward merges %s',
+                                   n, tags4, esc));
     raise exception '%', rb;
   exception when others then
     if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB574-1', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
