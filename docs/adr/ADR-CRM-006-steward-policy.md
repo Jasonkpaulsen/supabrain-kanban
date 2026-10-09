@@ -310,6 +310,17 @@ A merge still writes its own `merge` audit row through `crm_merge_people`.
   suspended. The suspension is a row in the decision log (`decision = 'suspend'`), and it holds
   until Jason or QA writes a `resume` row.
 
+> **Amendment (SB-585, 2026-10-08).** "Suspended" has one definition,
+> `crm_steward_suspended()`. It is true when the owner's newest `suspend`/`resume` row, ordered
+> by `seq`, is a `suspend`.
+> - `seq` is a unique `GENERATED ALWAYS` identity. It rises even within one transaction, so the
+>   last row written always wins.
+> - The steward run, QA sampling (SB-575) and the digest (SB-574) all read suspension through
+>   this function.
+> - `seq`, `id` and `created_at` are server-authored. Callers hold INSERT only on the other
+>   columns, so they cannot forge order or time in the append-only log, not even with
+>   `OVERRIDING SYSTEM VALUE`.
+
 ## 8. What still goes to Jason (weekly digest, SB-574, target under 5 items)
 
 - sensitivity classification;
