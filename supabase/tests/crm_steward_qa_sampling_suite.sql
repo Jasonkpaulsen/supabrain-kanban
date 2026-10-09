@@ -23,7 +23,7 @@ declare
   sb  constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';   -- SB project
   md5_sample    constant text := '2db52bfdf26524e54c5db71795bf9b8c';
   md5_verdict   constant text := '614c68654a54ae4b9b79006b46328b9d';   -- after 20261009032904 (suspend only on a wrong merge verdict)
-  md5_scheduled constant text := 'bc7f874c33c447d1fcc40745dc86d9f0';
+  md5_scheduled constant text := '018a00808c60d53efc0c8f819bef72cc';   -- after 20261009034206 (SB-574 adds the digest to 'weekly')
   rb  constant text := '__sb575_rollback__';
   r jsonb := '{}'::jsonb;
   n int; m int; k int; i int; fails int; st text; msg text; txt text; cmd text;
@@ -575,12 +575,12 @@ begin
               and ar.status = 'completed' and ar.trigger_type = 'scheduled' and ar.user_id = ub and ar.project_id = sb
               and ar.run_metadata->>'task' = 'weekly' and ar.run_metadata->>'source' = 'crm_steward_scheduled'
               and (ar.run_metadata#>>'{summary,qa_sample,sampled}')::int > 0
-              and ar.result_summary ~ '^qa sample \d+ \(merges \d+\) SB-\d+$'
+              and ar.result_summary ~ '^qa sample \d+ \(merges \d+\) SB-\d+; digest '
               and ar.duration_ms is not null and ar.error_message is null
               and n = runs1 + 1 and m = wi1 and k = 1
              then 'pass' else format('FAIL: role %s owner %s runs %s->%s->%s run_count %s->%s tickets %s->%s->%s status %s task %s dur %s summary_ok %s skipped_runs %s',
                                      cu, uid = ub, runs0, runs1, n, rc0, rc1, wi0, wi1, m, ar.status, ar.run_metadata->>'task', ar.duration_ms,
-                                     ar.result_summary ~ '^qa sample \d+ \(merges \d+\) SB-\d+$', k) end);
+                                     ar.result_summary ~ '^qa sample \d+ \(merges \d+\) SB-\d+; digest ', k) end);
       r := r || jsonb_build_object('TC-SB575-13.evidence', format('run %s: %s, duration_ms %s, %s; second run skipped %s',
                                      ar.id, ar.status, ar.duration_ms, ar.result_summary, k));
       raise exception '%', rb;

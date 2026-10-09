@@ -21,8 +21,8 @@ declare
   ub     constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';           -- owner
   aid    constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';           -- CRM Data Steward
   sb     constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';           -- SB project
-  skill_md5 constant text := '883804f1500b90f3f77e0f91deedadbe';            -- SKILL.md (device + repo-independent copy)
-  fn_md5    constant text := 'bc7f874c33c447d1fcc40745dc86d9f0';            -- body of 20261009031412_sb575_..._qa_sampling.sql (adds 'weekly'; daily path unchanged)
+  skill_md5 constant text := '678af7004d3093db1a5662e353d73be6';            -- SKILL.md v1.1 (SB-574; device + skills.content)
+  fn_md5    constant text := '018a00808c60d53efc0c8f819bef72cc';            -- body of 20261009034206_sb574_..._weekly_digest.sql (weekly digest + failure escalation; daily path unchanged)
   rb     constant text := '__sb576_rollback__';
   r jsonb := '{}'::jsonb;
   cmd text; n int; m int; k int; fails int; st text; msg text; res jsonb;
