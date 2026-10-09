@@ -352,6 +352,30 @@ A merge still writes its own `merge` audit row through `crm_merge_people`.
 - a suspension of auto-merge;
 - for information only, no action: that week's automatic merges with their undo handles.
 
+> **Amendment (SB-574, 2026-10-08): how the digest works.** `crm_steward_digest(p_deliver)` builds
+> the digest; with `p_deliver = false` it is a read-only preview. It holds one item per entity,
+> ids only:
+> - `tier_a_conflict`;
+> - `gray_zone_shared_context`;
+> - `restricted_blocks_merge`: strong pairs the steward refuses to merge;
+> - `strong_pair_not_merged`: strong pairs the §4 rule does not cover, the "never a guess" cases;
+> - `auto_merge_suspended`;
+> - `wrong_merge_not_undone`: the latest QA verdict is wrong and the merge is not in
+>   `crm_unmerges`;
+> - `steward_health`: failed runs this week, or daily runs capped 3 days running.
+>
+> Sensitivity classification yields no items, because classification is always a human act
+> (ADR-CRM-001 §5) and the steward never classifies.
+>
+> **Delivery.** `crm_steward_scheduled('weekly')` delivers it after the QA sample, at most once
+> per 6 days, as one SB ticket for JARVIS:
+> - `awaiting_jason` (flagged for Jason) when there are items;
+> - `todo` (for the briefing) when there are only FYI merges;
+> - nothing when there is nothing.
+>
+> **Failed runs.** A failed scheduled run escalates at once: one `escalated`/high bug for JARVIS,
+> and no new ticket while one is open.
+
 ## 9. Consequences
 
 - `is_confirmed` stops meaning "a person looked at it". Anything that must know uses
