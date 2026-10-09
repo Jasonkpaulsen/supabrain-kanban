@@ -196,9 +196,26 @@ as jsonb. It runs as the owner (SECURITY INVOKER, RLS).
   decision log is a `suspend`.
 - **Run id:** every decision row carries the run's `run_id`.
 
-**Scheduling** belongs to the steward agent (SB-576). It calls the function daily with the
-owner's own session. No cron job calls it as `postgres`, because RLS and `auth.uid()` need a
-real owner.
+**Scheduling** belongs to the steward agent (SB-576). The run never executes as `postgres`,
+because RLS and `auth.uid()` need a real owner.
+
+> **Amendment (SB-576, 2026-10-08).** The schedule is a pg_cron job, `crm-steward-daily`, at
+> `20 10 * * *` UTC. The job does not run the steward as `postgres`. Inside one DO block it:
+> 1. sets `request.jwt.claims` to the owner, taking the owner from the `CRM Data Steward`
+>    agent row so the job holds no literal id;
+> 2. runs `SET LOCAL ROLE authenticated`, which is exactly what an API call with the owner's
+>    JWT gets;
+> 3. calls `crm_steward_scheduled('daily')`.
+>
+> That wrapper (SECURITY INVOKER, pinned search_path, closed to anon):
+> - is a no-op while the agent is missing, not `active`, or has `automation_enabled = false`;
+> - otherwise calls `crm_steward_run(false, 200)`;
+> - writes one `agent_runs` row (`trigger_type = 'scheduled'`, summary in `run_metadata`). A
+>   raised error becomes a `failed` run, not an aborted job;
+> - updates the agent's `last_run_at`, `run_count`, `error_count` and `last_error`.
+>
+> No cron command names `crm_steward_run` directly (asserted in the migration).
+> SB-575/SB-574 add a `weekly` task to the same wrapper.
 
 **Tier C scope today:** facts (corroborate and expire) and interactions (expire). The CRM has no
 Tier C contact points: calendar import never creates them, and agents propose facts.
