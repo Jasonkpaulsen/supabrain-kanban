@@ -335,8 +335,10 @@ A merge still writes its own `merge` audit row through `crm_merge_people`.
 > - **Verdict.** `crm_steward_record_verdict(decision, 'correct'|'wrong', reason)` writes a
 >   `qa_verdict` row. It accepts only the owner's `auto_*` decisions, and a later verdict
 >   supersedes an earlier one. It never undoes anything.
-> - **Threshold.** The rule is evaluated on every verdict: take the latest verdict of each of the
->   last 50 merge decisions with a verdict, by `seq`. If wrong ÷ count > 2% and auto-merge is
+> - **Threshold.** The rule is evaluated when a `wrong` verdict lands on an `auto_merge`. A
+>   correct verdict, or a verdict on another decision type, can never raise the rate, so a
+>   `resume` holds until the next wrong merge (QA defect D1, TC-SB575-6). Take the latest
+>   verdict of each of the last 50 merge decisions with a verdict, by `seq`. If wrong ÷ count > 2% and auto-merge is
 >   not already suspended, write one `suspend` row (`refers_to` = the tripping verdict).
 >   - 1 wrong in 50 is exactly 2% and does not suspend.
 >   - With fewer than 50 verdicts, any wrong merge suspends.

@@ -22,7 +22,7 @@ declare
   aid    constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';           -- CRM Data Steward
   sb     constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';           -- SB project
   skill_md5 constant text := '883804f1500b90f3f77e0f91deedadbe';            -- SKILL.md (device + repo-independent copy)
-  fn_md5    constant text := 'c1dfea5b9b212afa3a3806e8240c8616';            -- body of 20261009022223_..._no_generated_column.sql
+  fn_md5    constant text := 'bc7f874c33c447d1fcc40745dc86d9f0';            -- body of 20261009031412_sb575_..._qa_sampling.sql (adds 'weekly'; daily path unchanged)
   rb     constant text := '__sb576_rollback__';
   r jsonb := '{}'::jsonb;
   cmd text; n int; m int; k int; fails int; st text; msg text; res jsonb;
@@ -87,12 +87,12 @@ begin
     r := r || jsonb_build_object('TC-SB576-2', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
   end;
 
-  -- ------------------------------------------------ TC-SB576-3: unknown task -> 22023
+  -- ------------------------------------------------ TC-SB576-3: unknown task -> 22023 ('weekly' is a task since SB-575)
   begin
     k := 0;
     perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
     set local role authenticated;
-    foreach fn in array array['weekly', 'DAILY', 'daily ', '', '__null__'] loop
+    foreach fn in array array['monthly', 'DAILY', 'daily ', '', '__null__'] loop
       st := null;
       begin
         perform public.crm_steward_scheduled(case when fn = '__null__' then null else fn end);
