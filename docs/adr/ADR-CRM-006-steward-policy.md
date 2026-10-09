@@ -201,8 +201,10 @@ because RLS and `auth.uid()` need a real owner.
 
 > **Amendment (SB-576, 2026-10-08).** The schedule is a pg_cron job, `crm-steward-daily`, at
 > `20 10 * * *` UTC. The job does not run the steward as `postgres`. Inside one DO block it:
-> 1. sets `request.jwt.claims` to the owner, taking the owner from the `CRM Data Steward`
->    agent row so the job holds no literal id;
+> 1. sets `request.jwt.claims` to the owner of the steward agent, looked up by that agent's
+>    **id**. It never uses a name lookup: the job runs as `postgres` before the role switch, so a
+>    name lookup would see every user's agents, and any user could take over the schedule with
+>    an older same-name agent (QA defect D1, TC-SB576-12). The job holds no literal user id;
 > 2. runs `SET LOCAL ROLE authenticated`, which is exactly what an API call with the owner's
 >    JWT gets;
 > 3. calls `crm_steward_scheduled('daily')`.
@@ -215,6 +217,8 @@ because RLS and `auth.uid()` need a real owner.
 > - updates the agent's `last_run_at`, `run_count`, `error_count` and `last_error`.
 >
 > No cron command names `crm_steward_run` directly (asserted in the migration).
+> If the steward agent is ever deleted and re-created, the job must be re-pinned to the new id.
+> Until then every daily run fails with 42501 (visible in `cron.job_run_details`) and does nothing.
 > SB-575/SB-574 add a `weekly` task to the same wrapper.
 
 **Tier C scope today:** facts (corroborate and expire) and interactions (expire). The CRM has no
