@@ -321,6 +321,26 @@ A merge still writes its own `merge` audit row through `crm_merge_people`.
 >   columns, so they cannot forge order or time in the append-only log, not even with
 >   `OVERRIDING SYSTEM VALUE`.
 
+> **Amendment (SB-575, 2026-10-08): how sampling works.**
+> - **Sample.** `crm_steward_qa_sample(10)` runs from `crm_steward_scheduled('weekly')`, pg_cron
+>   `crm-steward-weekly`, Mondays 10:40 UTC.
+>   - Merges come first: every unsampled `auto_merge` is eligible, in random order. Random other
+>     automatic decisions from the last 7 days fill the remaining slots. Merges are rare, and
+>     the metric is the wrong-merge rate, so a uniform sample would starve it.
+>   - Each sampled decision gets one `qa_sample` row (`refers_to` = the decision). A decision is
+>     never sampled twice.
+>   - It runs at most once per 6 days.
+>   - It opens one SB ticket for SupaBrain QA (epic SB-570) holding ids, rules and undo handles
+>     only.
+> - **Verdict.** `crm_steward_record_verdict(decision, 'correct'|'wrong', reason)` writes a
+>   `qa_verdict` row. It accepts only the owner's `auto_*` decisions, and a later verdict
+>   supersedes an earlier one. It never undoes anything.
+> - **Threshold.** The rule is evaluated on every verdict: take the latest verdict of each of the
+>   last 50 merge decisions with a verdict, by `seq`. If wrong ÷ count > 2% and auto-merge is
+>   not already suspended, write one `suspend` row (`refers_to` = the tripping verdict).
+>   - 1 wrong in 50 is exactly 2% and does not suspend.
+>   - With fewer than 50 verdicts, any wrong merge suspends.
+
 ## 8. What still goes to Jason (weekly digest, SB-574, target under 5 items)
 
 - sensitivity classification;
