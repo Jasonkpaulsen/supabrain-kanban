@@ -1,0 +1,11 @@
+-- CLSRM-40 finding (3): teachers make typos, and the resolver has to survive them.
+--
+-- "worksheet" returned ZERO candidates because the assignment is titled
+-- "Tips and Traits Worsheet" -- the teacher dropped the k. Substring matching
+-- cannot see through that, and no alias list can enumerate other people's
+-- spelling mistakes.
+--
+-- Installed into the `extensions` schema, matching every other extension on
+-- this project. Additive and reversible; nothing uses it until the resolver
+-- migration that follows.
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA extensions;
