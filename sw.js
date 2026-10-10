@@ -7,13 +7,15 @@
 // SB-182: bumped v10 -> v11 because config.js joined the app shell. The shell
 // is served cache-first, so without a new cache name a returning visitor would
 // keep the old page and never fetch the file that now holds the key.
-const CACHE_NAME = 'jarvis-pwa-v11';
+// SB-565: bumped v11 -> v12 because cancel-ui.js joined the app shell.
+const CACHE_NAME = 'jarvis-pwa-v12';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
 const APP_SHELL = [
   './jarvis-pwa.html',
   './config.js',
+  './cancel-ui.js',
   './manifest.json',
   './kanban-icon.svg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'

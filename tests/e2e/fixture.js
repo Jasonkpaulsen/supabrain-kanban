@@ -15,7 +15,7 @@ const FIXTURE = {
   total: 25,
   byStatus: {
     backlog: 5, todo: 2, in_progress: 3, on_hold: 0,
-    blocked: 0, review: 5, escalated: 0, done: 10,
+    blocked: 0, review: 5, escalated: 0, done: 10, cancelled: 0,
   },
   donePct: 40,
   // todo + in_progress + review + escalated, matching renderBoardStats. The
@@ -56,6 +56,8 @@ const SPEC_COLUMNS = [
   { status: 'review', title: 'Review', color: 'rgb(210, 153, 34)' },
   { status: 'escalated', title: 'Escalated', color: 'rgb(240, 136, 62)' },
   { status: 'done', title: 'Done', color: 'rgb(63, 185, 80)' },
+  // SB-565: Cancelled is a terminal column after Done (ADR-FLOW-004, spec SB-564).
+  { status: 'cancelled', title: 'Cancelled', color: 'rgb(110, 118, 129)' },
 ];
 
 // opts.payload swaps the stubbed board data (TC-SB118 uses the bulk variant).
