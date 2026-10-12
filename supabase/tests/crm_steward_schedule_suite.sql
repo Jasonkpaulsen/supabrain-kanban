@@ -5,7 +5,9 @@
 -- ends by raising, so nothing it changes survives. On top of that, every case that changes data
 -- (automation_enabled, status, a revoked grant, a fixture agent) runs in its own sub-block that
 -- raises a private sentinel at its end, so its changes are rolled back before the next case starts
--- and automation_enabled is never left true, even inside the transaction.
+-- and automation_enabled ends every case as it started, even inside the transaction.
+-- Since the steward went live (10-09) automation_enabled is true in production; the suite records the
+-- live value first and works with either (TC-SB576-4 turns it off inside its own rolled-back sub-block).
 --
 -- Cases 4-7, 12 and 13 run the job's real command text, read from cron.job and run with EXECUTE,
 -- exactly as pg_cron would run it. Case 6 runs the real steward (crm_steward_run(false, 200)) on
@@ -22,7 +24,7 @@ declare
   aid    constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';           -- CRM Data Steward
   sb     constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';           -- SB project
   skill_md5 constant text := '678af7004d3093db1a5662e353d73be6';            -- SKILL.md v1.1 (SB-574; device + skills.content)
-  fn_md5    constant text := '018a00808c60d53efc0c8f819bef72cc';            -- body of 20261009034206_sb574_..._weekly_digest.sql (weekly digest + failure escalation; daily path unchanged)
+  fn_md5    constant text := '12c91c4a5479ea7238213dfe27e4a7a4';            -- body after 20261010033440_sb563 (SB-574 body with w.status not in ('done', 'cancelled'); was 018a0080...)
   rb     constant text := '__sb576_rollback__';
   r jsonb := '{}'::jsonb;
   cmd text; n int; m int; k int; fails int; st text; msg text; res jsonb;
@@ -31,8 +33,10 @@ declare
   cu text; uid uuid; other uuid; fx uuid;
   ar public.agent_runs%rowtype;
   fn text;
+  auto0 boolean;
 begin
   select c.command into cmd from cron.job c where c.jobname = 'crm-steward-daily';
+  select automation_enabled into auto0 from public.agents where id = aid;
 
   -- ------------------------------------------------ TC-SB576-1: security posture and the anon grant
   begin
@@ -113,12 +117,10 @@ begin
   begin
     begin
       reset role;
+      update public.agents set automation_enabled = false where id = aid and automation_enabled;   -- rolled back below
       select count(*) into runs0 from public.agent_runs where agent_id = aid;
       select run_count, error_count, last_run_at, updated_at into rc0, ec0, lra0, upd0 from public.agents where id = aid;
       select count(*) into dec0 from public.crm_steward_decisions;
-      if (select automation_enabled from public.agents where id = aid) then
-        raise exception 'precondition: automation_enabled is already true';
-      end if;
       execute cmd;                                   -- the job's own text, as pg_cron runs it
       cu := current_user; uid := auth.uid();
       -- and the wrapper's own answer, as the owner
@@ -291,7 +293,7 @@ begin
                              join public.agent_projects pp on pp.agent_id = pm.id and pp.project_id = sb) then '13-pm_roster' end,
       case when not exists (select 1 from a join public.agents j on j.id = a.reports_to_agent_id
                              where j.name like 'JARVIS%' and j.status = 'active') then 'reports_to' end,
-      case when exists (select 1 from a where automation_enabled) then 'automation_on' end,
+      case when (select automation_enabled from a) is distinct from auto0 then 'automation_changed' end,
       case when (select count(*) from public.agents where name = 'CRM Data Steward') <> 1 then 'agent_count' end
     ) into msg;
     r := r || jsonb_build_object('TC-SB576-9', case when coalesce(msg, '') = '' then 'pass' else 'FAIL: missing ' || msg end);
@@ -388,9 +390,10 @@ begin
   end;
 
   reset role;
-  if exists (select 1 from public.agents where id = aid and automation_enabled) then
-    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled left true inside the suite');
+  if (select automation_enabled from public.agents where id = aid) is distinct from auto0 then
+    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled changed inside the suite');
   end if;
+  r := r || jsonb_build_object('GUARD.evidence', format('automation_enabled at start: %s', auto0));
 
   select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
   if fails = 0 then

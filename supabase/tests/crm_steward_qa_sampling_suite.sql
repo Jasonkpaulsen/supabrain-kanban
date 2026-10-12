@@ -11,7 +11,8 @@
 -- synthetic, inserted as postgres so created_at can be set) and ub (the owner; real steward and
 -- sampler runs, a real SB ticket, all rolled back). One transaction that always ends by raising,
 -- and every case also rolls back its own sub-block, so no decision, agent change, agent_runs row or
--- work_items ticket survives, and the owner's automation_enabled is never left on.
+-- work_items ticket survives, and the owner's automation_enabled ends as it started (true in
+-- production since the steward went live on 10-09; TC-SB575-12 turns it off inside its own sub-block).
 -- Pass = the raised message starts with "CRM-STEWARD-QA-SAMPLING PASS". The message carries only
 -- counts, booleans, sqlstates and ids, never CRM names, emails or phones.
 
@@ -23,7 +24,7 @@ declare
   sb  constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';   -- SB project
   md5_sample    constant text := '2db52bfdf26524e54c5db71795bf9b8c';
   md5_verdict   constant text := '614c68654a54ae4b9b79006b46328b9d';   -- after 20261009032904 (suspend only on a wrong merge verdict)
-  md5_scheduled constant text := '018a00808c60d53efc0c8f819bef72cc';   -- after 20261009034206 (SB-574 adds the digest to 'weekly')
+  md5_scheduled constant text := '12c91c4a5479ea7238213dfe27e4a7a4';   -- after 20261010033440 (SB-563: a cancelled failure ticket no longer suppresses the next; was 018a0080... after SB-574)
   rb  constant text := '__sb575_rollback__';
   r jsonb := '{}'::jsonb;
   n int; m int; k int; i int; fails int; st text; msg text; txt text; cmd text;
@@ -33,7 +34,9 @@ declare
   wi public.work_items%rowtype; ar public.agent_runs%rowtype;
   runs0 int; runs1 int; rc0 int; rc1 int; wi0 int; wi1 int; dec0 int; dec1 int;
   cu text; uid uuid; ub_dec uuid; epic uuid;
+  auto0 boolean;
 begin
+  select automation_enabled into auto0 from public.agents where id = aid;
   -- fixture tenant must be empty
   if exists (select 1 from public.crm_steward_decisions where user_id = ua)
      or exists (select 1 from public.crm_people where user_id = ua) then
@@ -523,7 +526,7 @@ begin
     begin
       select c.command into cmd from cron.job c where c.jobname = 'crm-steward-weekly';
       reset role;
-      if (select automation_enabled from public.agents where id = aid) then raise exception 'precondition: automation is on'; end if;
+      update public.agents set automation_enabled = false where id = aid and automation_enabled;   -- rolled back below
       select count(*) into runs0 from public.agent_runs where agent_id = aid;
       select run_count into rc0 from public.agents where id = aid;
       select count(*) into wi0 from public.work_items where meta->>'issue_type' = 'crm_steward_qa_sample';
@@ -635,9 +638,10 @@ begin
   end;
 
   reset role;
-  if exists (select 1 from public.agents where id = aid and automation_enabled) then
-    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled left true inside the suite');
+  if (select automation_enabled from public.agents where id = aid) is distinct from auto0 then
+    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled changed inside the suite');
   end if;
+  r := r || jsonb_build_object('GUARD.evidence', format('automation_enabled at start: %s', auto0));
 
   select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
   if fails = 0 then

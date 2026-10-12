@@ -22,7 +22,7 @@ declare
   aid constant uuid := '35c61865-2677-42fd-aad3-d2aa8fa81e85';   -- owner's CRM Data Steward
   sb  constant uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';   -- SB project
   md5_digest    constant text := '8417d6827ff8ef52299941a02d8a278d';   -- after 20261009040647 (pair loop mirrors the steward, QA D1)
-  md5_scheduled constant text := '018a00808c60d53efc0c8f819bef72cc';
+  md5_scheduled constant text := '12c91c4a5479ea7238213dfe27e4a7a4';   -- after 20261010033440 (SB-563 cancelled clause; was 018a0080... after SB-574)
   md5_skill     constant text := '678af7004d3093db1a5662e353d73be6';
   rb  constant text := '__sb574_rollback__';
   r jsonb := '{}'::jsonb;
@@ -31,7 +31,9 @@ declare
   a1 uuid; b1 uuid; ag uuid; org uuid; grp uuid; rt uuid; ib uuid; ix uuid; ml uuid; dec_id uuid; vid uuid;
   c0 jsonb; c1 jsonb; epic uuid; wi public.work_items%rowtype; ar public.agent_runs%rowtype;
   wi0 int; wi1 int; runs0 int; runs1 int; ec0 int; ec1 int; esc text; esc2 text;
+  auto0 boolean;
 begin
+  select automation_enabled into auto0 from public.agents where id = aid;
   if exists (select 1 from public.crm_steward_decisions where user_id = ua)
      or exists (select 1 from public.crm_people where user_id = ua)
      or exists (select 1 from public.agents where user_id = ua and name = 'CRM Data Steward') then
@@ -572,6 +574,7 @@ begin
     select count(*) into runs0 from public.agent_runs where agent_id = aid;
     select count(*) into wi0 from public.work_items;
     select count(*) into k from public.crm_steward_decisions;
+    update public.agents set automation_enabled = false where id = aid and automation_enabled;   -- live since 10-09; this sub-block rolls back
     execute cmd;                                                       -- automation off
     reset role;
     msg := format('off: runs %s tickets %s decisions %s; ', (select count(*) from public.agent_runs where agent_id = aid) - runs0,
@@ -639,9 +642,10 @@ begin
   end;
 
   reset role;
-  if exists (select 1 from public.agents where id = aid and automation_enabled) then
-    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled left true inside the suite');
+  if (select automation_enabled from public.agents where id = aid) is distinct from auto0 then
+    r := r || jsonb_build_object('GUARD', 'FAIL: automation_enabled changed inside the suite');
   end if;
+  r := r || jsonb_build_object('GUARD.evidence', format('automation_enabled at start: %s', auto0));
 
   select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
   if fails = 0 then
