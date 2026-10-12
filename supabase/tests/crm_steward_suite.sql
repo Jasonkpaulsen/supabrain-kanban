@@ -286,6 +286,8 @@ begin
   insert into public.crm_people (display_name, family_name) values ('Saoirse Quill', 'Quill') returning id into s3b;
   insert into public.crm_contact_points (person_id, kind, value) values (s3a, 'email', 's3@zq.example'), (s3b, 'email', 's3@zq.example');
   perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
+  -- the owner's steward has run live with automation on since 10-09; this case needs it off (the suite rolls back)
+  update public.agents set automation_enabled = false where user_id = ub and name = 'CRM Data Steward' and automation_enabled;
   s_b := public.crm_steward_run(false);
   s_b2 := public.crm_steward_run(true);
   reset role;
