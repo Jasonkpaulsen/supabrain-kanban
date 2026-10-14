@@ -40,10 +40,22 @@
 // what its parameters mean; a flat name two operations disagree about is
 // refused rather than applied to both. Every list result carries `truncated`
 // and `total`, and the response names any result that was cut short.
+//
+// External waits (SB-593, ADR-FLOW-005 D3): stale_wip and blocked_items skip
+// any item whose meta.awaiting_external names an outside party (see
+// NOT_WAITING_FILTER in ops.ts); external_waits lists those items from
+// v_external_wait_status, split into on-track, expired and no-clock. Expired
+// waits surface there, once, rather than as stale work. wip_queue (SB-598)
+// and decision_digest (SB-554) are read-only views of objects the database
+// owns.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { PARAM_SPECS, resolveParams, truncated } from "./params.ts";
+import {
+  EXTERNAL_WAIT_FIELDS, type ExternalWaitRow, groupExternalWaits, groupWipQueue, NOT_WAITING_FILTER,
+  WIP_QUEUE_FIELDS, type WipQueueRow,
+} from "./ops.ts";
 
 const MAX_ROWS = 500;          // hard cap on any single read
 const WORK_ITEM_SCAN = 5000;   // cap on the per-agent work-item fetch
@@ -251,13 +263,14 @@ const OPERATIONS: Record<string, Op> = {
   },
   stale_wip: {
     mutates: false,
-    summary: "in_progress items untouched for staleDays.",
+    summary: "in_progress items untouched for staleDays, skipping items waiting on an outside party (see external_waits).",
     run: async ({ sb, p }) => {
       const days = p.staleDays;
       const r = listed(await sb.from("work_items")
         .select("ticket_code,title,assignee,priority,updated_at,project_id", { count: "exact" })
         .eq("archived", false)
         .eq("status", "in_progress")
+        .or(NOT_WAITING_FILTER)
         .lt("updated_at", isoDaysAgo(days))
         .order("updated_at", { ascending: true })
         .limit(MAX_ROWS), MAX_ROWS);
@@ -266,13 +279,14 @@ const OPERATIONS: Record<string, Op> = {
   },
   blocked_items: {
     mutates: false,
-    summary: "blocked / on_hold items untouched for staleDays.",
+    summary: "blocked / on_hold items untouched for staleDays, skipping items waiting on an outside party (see external_waits).",
     run: async ({ sb, p }) => {
       const days = p.staleDays;
       const r = listed(await sb.from("work_items")
         .select("ticket_code,title,status,assignee,priority,updated_at,project_id", { count: "exact" })
         .eq("archived", false)
         .in("status", ["blocked", "on_hold"])
+        .or(NOT_WAITING_FILTER)
         .lt("updated_at", isoDaysAgo(days))
         .order("updated_at", { ascending: true })
         .limit(MAX_ROWS), MAX_ROWS);
@@ -298,6 +312,40 @@ const OPERATIONS: Record<string, Op> = {
                truncated: parked.truncated || unapproved.truncated };
     },
   },
+
+  // --- ADR-FLOW-005 (SB-593, SB-598, SB-554): read-only views the database owns
+  external_waits: {
+    mutates: false,
+    summary: "SB-593: open items waiting on an outside party (v_external_wait_status), as on_track / expired / no_clock. " +
+      "Expired = their window lapsed, follow up; no_clock = data-quality gap.",
+    run: async ({ sb }) => {
+      const r = listed(await sb.from("v_external_wait_status")
+        .select([...EXTERNAL_WAIT_FIELDS, "wait_state"].join(","), { count: "exact" })
+        .order("days_to_clock", { ascending: true, nullsFirst: false })
+        .limit(MAX_ROWS), MAX_ROWS);
+      const g = groupExternalWaits(r.rows as unknown as ExternalWaitRow[]);
+      return { ...g, count: r.rows.length, total: r.total, truncated: r.truncated };
+    },
+  },
+  wip_queue: {
+    mutates: false,
+    summary: "SB-598: tickets parked by enforce_wip_limit (v_wip_queue), grouped by assignee; ready = assignee has a free slot.",
+    run: async ({ sb }) => {
+      const r = listed(await sb.from("v_wip_queue")
+        .select(WIP_QUEUE_FIELDS.join(","), { count: "exact" })
+        .order("assignee", { ascending: true })
+        .order("priority", { ascending: true })
+        .order("blocked_at", { ascending: true })
+        .limit(MAX_ROWS), MAX_ROWS);
+      const g = groupWipQueue(r.rows as unknown as WipQueueRow[]);
+      return { ...g, count: r.rows.length, total: r.total, truncated: r.truncated };
+    },
+  },
+  decision_digest: {
+    mutates: false,
+    summary: "SB-554: public.jason_decision_digest() — each open item waiting on Jason once, with aging and folded no-op escalations.",
+    run: async ({ sb }) => unwrap(await sb.rpc("jason_decision_digest")),
+  },
 };
 
 // PARAM_SPECS lives in params.ts so it can be tested; make sure it names only
@@ -313,10 +361,11 @@ const BUNDLES: Record<string, string[]> = {
     "qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report",
   ],
   "management-agent-sweep": [
-    "agents_missing_chain", "agent_load", "agents_idle_with_queue",
+    "agents_missing_chain", "agent_load", "agents_idle_with_queue", "decision_digest",
   ],
   "pm-triage-dispatch": [
     "untriaged_items", "review_queue_aging", "stale_wip", "blocked_items", "awaiting_human",
+    "external_waits", "wip_queue", "decision_digest",
   ],
 };
 

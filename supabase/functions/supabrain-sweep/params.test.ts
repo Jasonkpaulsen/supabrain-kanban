@@ -14,8 +14,10 @@ const ALL_OPS = [
   "ping", "qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report",
   "agents_missing_chain", "agent_load", "agents_idle_with_queue",
   "untriaged_items", "review_queue_aging", "stale_wip", "blocked_items", "awaiting_human",
+  "external_waits", "wip_queue", "decision_digest", // SB-593 / ADR-FLOW-005 D11
 ];
-const PM_TRIAGE = ["untriaged_items", "review_queue_aging", "stale_wip", "blocked_items", "awaiting_human"];
+const PM_TRIAGE = ["untriaged_items", "review_queue_aging", "stale_wip", "blocked_items", "awaiting_human",
+                   "external_waits", "wip_queue", "decision_digest"];
 
 function ok(r: ReturnType<typeof resolveParams>) {
   assert.equal(r.ok, true, r.ok ? "" : `expected ok, got: ${r.error}`);
@@ -151,7 +153,7 @@ test("every declared parameter has a meaning and a default inside its range", ()
 test("the flat names the three bundles could send are unambiguous within each bundle", () => {
   const bundles: Record<string, string[]> = {
     "process-engineer-daily": ["qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report"],
-    "management-agent-sweep": ["agents_missing_chain", "agent_load", "agents_idle_with_queue"],
+    "management-agent-sweep": ["agents_missing_chain", "agent_load", "agents_idle_with_queue", "decision_digest"],
     "pm-triage-dispatch": PM_TRIAGE,
   };
   for (const [name, ops] of Object.entries(bundles)) {

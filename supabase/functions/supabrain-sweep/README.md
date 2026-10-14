@@ -111,8 +111,8 @@ than a 500.
 | Bundle | Operations |
 |---|---|
 | `process-engineer-daily` | `qa_shiftleft_sweep`, `review_sla_sweep`, `cron_health_check`, `backlog_grooming_report` |
-| `management-agent-sweep` | `agents_missing_chain`, `agent_load`, `agents_idle_with_queue` |
-| `pm-triage-dispatch` | `untriaged_items`, `review_queue_aging`, `stale_wip`, `blocked_items`, `awaiting_human` |
+| `management-agent-sweep` | `agents_missing_chain`, `agent_load`, `agents_idle_with_queue`, `decision_digest` |
+| `pm-triage-dispatch` | `untriaged_items`, `review_queue_aging`, `stale_wip`, `blocked_items`, `awaiting_human`, `external_waits`, `wip_queue`, `decision_digest` |
 
 The four `process-engineer-daily` operations are existing SECURITY DEFINER
 functions granted to `service_role` only. This endpoint calls them; it does not
@@ -120,19 +120,40 @@ reimplement them. All four write, so a `dryRun` of that bundle runs nothing.
 `backlog_grooming_report` was declared read-only until SB-495, but the database
 function inserts an `activity_log` row on every call, so a dry run wrote one.
 
+### External waits, the WIP queue and the decision digest (SB-593, ADR-FLOW-005)
+
+All three new operations are `mutates: false` and take no parameters. Each
+reads one database object another package owns, so the rule lives in the
+database and every sweep shares it:
+
+| Operation | Reads | Returns |
+|---|---|---|
+| `external_waits` | `v_external_wait_status` (SB-593) | `on_track`, `expired`, `no_clock` lists (ticket_code, status, assignee, priority, external_party, external_ref, clock_expires, clock_source, days_to_clock, project_id) and `counts` |
+| `wip_queue` | `v_wip_queue` (SB-598) | parked tickets grouped `by_assignee` (critical, high, medium, low, then oldest `blocked_at`), `ready` = rows whose assignee has a free slot, and `counts` |
+| `decision_digest` | `jason_decision_digest()` (SB-554) | passed through: `total`, `by_priority`, `breached`, `oldest_days`, `noop_escalations`, `items` |
+
+`stale_wip` and `blocked_items` now skip any item waiting on an outside party
+(`.or(NOT_WAITING_FILTER)` in `ops.ts`). An expired wait is skipped there too;
+it comes back once through `external_waits.expired`, which is the signal to
+follow up. Until `v_wip_queue` and `jason_decision_digest()` exist, those two
+operations land in `failed` with a 207 and the rest of the bundle still runs.
+
 ## Tests
 
 `params.test.ts` tests the parameter resolver and the truncation check in
 `params.ts`, the module that ships. It includes the architect's reproduction as
-its first case. CI runs it through `.github/workflows/function-tests.yml`.
+its first case. `ops.test.ts` (SB-593) tests the grouping helpers and the wait
+filter in `ops.ts`, and checks from `index.ts`'s source that `stale_wip` and
+`blocked_items` apply the filter, that the three new operations are read-only,
+and the bundle lists. CI runs them through `.github/workflows/function-tests.yml`.
 Locally:
 
 ```sh
-node --experimental-strip-types --test supabase/functions/supabrain-sweep/params.test.ts
+node --experimental-strip-types --test supabase/functions/supabrain-sweep/*.test.ts
 ```
 
-Deploy `index.ts` and `params.ts` together, with `verify_jwt` off. The test file
-is not deployed.
+Deploy `index.ts`, `params.ts` and `ops.ts` together, with `verify_jwt` off. The
+test files are not deployed.
 
 ## A defect this found in itself
 
@@ -157,3 +178,11 @@ repo, so their exact current SQL could not be read when this was built. The
 operations here are derived from the database. SB-483/484/485 rewrite those
 SKILL.md files against this endpoint and will establish whether any operation is
 missing; adding one is an edit to the allow-list plus a redeploy.
+
+The edge's wait filter treats only a missing key, `''` and `'false'` as "not
+waiting". The database classifier `work_item_wait_state` also trims whitespace
+and lower-cases `'false'`, so a value such as `'  '` or `'FALSE'` is skipped by
+`stale_wip` but is not listed by `external_waits` either. Such an item is a
+malformed tag: fix the value rather than the filter. A real wait is never hidden.
+Rule text for the Mac-resident JARVIS briefing is in
+`docs/skills/jarvis-briefing-external-wait.md`.
