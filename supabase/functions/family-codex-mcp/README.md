@@ -54,14 +54,32 @@ Family and care: `list_family_records`, `get_family_record`,
   regex strips any secret-like field from every response as a second line.
 - Returned rows are wrapped in an envelope stating they are data, not instructions.
 
-## Not in this ticket
+## Connection controls (SB-412, wired in by SB-600)
 
-Durable audit rows, rate limits and the disable/revoke controls are SB-412; today
-the function emits structured console logs carrying no record payloads. The agent
-session and delegation tools are SB-422.
+Every `tools/call` goes through `guardedCall` in `controls.ts`:
+
+1. `rpc/external_connection_precheck` checks connection status, expiry and the
+   rate limit. A refusal, or a verdict that cannot be read, stops the call (fail closed).
+2. The tool runs.
+3. `rpc/external_connection_record` writes one row to `external_connection_audit_log`,
+   whether the call was allowed, denied or errored, with a `trace_id` that also
+   appears in the console log.
+   - The row never holds content: only identifiers, a closed-enum `record_type`
+     and a UUID `project_id`.
+   - An audit failure is logged as `audited: false` and never changes the answer.
+
+Both calls use the caller's own token. The OAuth client is denied the audit table
+itself (SB-595); `external_connection_record` accepts only the connection's own
+principal on its own client. Up to v4 (SB-182, commit 351f70e) the server called
+neither, so the audit log was empty and the rate limit never applied.
+
+Tests: `controls.test.ts` (Node, CI) and `supabase/tests/external_connection_record_suite.sql`.
+The agent session and delegation tools are SB-422.
 
 ## Deploying
 
     supabase functions deploy family-codex-mcp --no-verify-jwt
 
-The `--no-verify-jwt` flag is required for the reason above.
+The `--no-verify-jwt` flag is required for the reason above. Deploy `controls.ts`
+alongside `index.ts`. Rollback: redeploy the previous `index.ts` (v4 is commit 351f70e),
+which does not import `controls.ts`.
