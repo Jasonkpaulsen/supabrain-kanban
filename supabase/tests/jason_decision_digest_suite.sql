@@ -1,8 +1,12 @@
--- Jason decision digest suite: TC-SB554-1..8 (SB-554; ADR-FLOW-005 D6-D7).
+-- Jason decision digest suite: TC-SB554-1..9 (SB-554; ADR-FLOW-005 D6-D7).
 --
 -- Run as postgres. One transaction that always ends by raising, so nothing it creates or
 -- inserts survives (fixtures, probe escalations, and the enforce-mode replacement of
 -- escalation_gate_mode in TC-SB554-8). Fixtures are SB-project chores owned by the owner.
+-- TC-SB554-9 and the TC-5 / TC-8 additions pin the pkg-2 verifier fixes: a folded escalation
+-- whose subject is not a digest row is listed as its own row (row_kind orphan_escalation),
+-- enforce mode refuses only when the subject itself waits on Jason, the classifier reads
+-- meta.escalates and meta.related, and the title rule is ~* '^\s*ESCALATION'.
 -- Pass = the raised message starts with "JASON_DECISION_DIGEST PASS". The message carries only
 -- counts, ticket codes, classes and sqlstates, never titles or free text.
 
@@ -16,7 +20,8 @@ declare
   ca text; cb text; cq text; cc text; cc2 text; cd text; ce text; cf text;
   h1 uuid; h2 uuid; h3 uuid; h4 uuid; k1 text; k2 text; k3 text; k4 text;
   pa uuid; pb uuid; pc uuid; pg uuid; pm uuid; pl uuid; cpa text; cpg text;
-  t text[]; m jsonb; n int; k int; fails int; st text; st2 text; msg text; v jsonb;
+  pw uuid; pp uuid; cpc text; cw text; cp text;
+  t text[]; m jsonb; n int; k int; fails int; st text; st2 text; st3 text; st4 text; msg text; v jsonb;
 begin
   -- ------------------------------------------------ fixtures (subjects)
   insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status)
@@ -66,10 +71,12 @@ begin
        = array['CIP-3','SB-1','SB-2','WW-4'] then k := k + 1; end if;
     if public.escalation_subject_codes('{"related_tickets":"SB-1, SB-2","requires_jason":true}') = '{}'::text[] then k := k + 1; end if;
     if public.escalation_subject_codes(null) = '{}'::text[] then k := k + 1; end if;
+    if public.escalation_subject_codes('{"escalates":" sb-7 ","related":"SB-8"}') = array['SB-7','SB-8'] then k := k + 1; end if;
+    if public.escalation_subject_codes('{"related":["SB-9","x"],"escalates":{"a":1}}') = array['SB-9'] then k := k + 1; end if;
     r := r || jsonb_build_object('TC-SB554-1', case
            when t = array['human_decision','human_decision','human_decision','human_decision','human_decision',
-                          'agent','agent','unresolved','unresolved','human_decision'] and k = 3 then 'pass'
-           else format('FAIL: classes %s, subject-code checks %s of 3', t, k) end);
+                          'agent','agent','unresolved','unresolved','human_decision'] and k = 5 then 'pass'
+           else format('FAIL: classes %s, subject-code checks %s of 5', t, k) end);
   exception when others then
     r := r || jsonb_build_object('TC-SB554-1', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
   end;
@@ -82,11 +89,11 @@ begin
     insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, meta)
       values (pj, ub, 'ESCALATION: qa-sb554 probe B', 'chore', 'todo', 'high', 'not_required', jsonb_build_object('upstream_ticket', cd))
       returning id into pb;
-    select array[a.meta->>'blocker_class', a.meta->>'digest_routed', a.meta->>'classified_by',
-                 b.meta->>'blocker_class', b.meta->>'digest_routed', b.meta->>'classified_by']
+    select array[a.meta->>'blocker_class', a.meta->>'digest_routed', a.meta->>'classified_by', a.meta->>'subject_class',
+                 b.meta->>'blocker_class', b.meta->>'digest_routed', b.meta->>'classified_by', b.meta->>'subject_class']
       into t from public.work_items a, public.work_items b where a.id = pa and b.id = pb;
     r := r || jsonb_build_object('TC-SB554-2', case
-           when t = array['human_decision','true','SB-554','agent','false','SB-554'] then 'pass'
+           when t = array['human_decision','true','SB-554','human_decision','agent','false','SB-554','agent'] then 'pass'
            else format('FAIL: %s', t) end);
   exception when others then
     r := r || jsonb_build_object('TC-SB554-2', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
@@ -137,17 +144,26 @@ begin
     if n <> 0 then msg := msg || format('[duplicates %s] ', n); end if;
     select count(*) into n
       from public.vw_jason_decision_digest d join public.work_items w on w.ticket_code = d.ticket_code
-     where w.title ilike 'ESCALATION%' and (w.meta->>'blocker_class' = 'human_decision' or coalesce(w.authority_level, 0) >= 3);
+     where d.row_kind = 'item'
+       and w.title ~* '^\s*ESCALATION' and (w.meta->>'blocker_class' = 'human_decision' or coalesce(w.authority_level, 0) >= 3);
     if n <> 0 then msg := msg || format('[folded rows listed %s] ', n); end if;
+    if exists (select 1 from public.vw_jason_decision_digest d
+                 join public.vw_jason_decision_digest d2 on d2.user_id = d.user_id and d2.ticket_code = any(d.escalations_attached)) then
+      msg := msg || '[attached escalation also listed] ';
+    end if;
     select escalations_attached into t from public.vw_jason_decision_digest where ticket_code = ca;
     if t is distinct from (select array_agg(x order by x) from unnest(array[cpa, cpg]) x) then
       msg := msg || format('[fixture a attached %s] ', t);
     end if;
     if exists (select 1 from public.vw_jason_decision_digest where ticket_code in (cpg, cpa)) then msg := msg || '[probe listed] '; end if;
     if not exists (select 1 from public.vw_jason_decision_digest where ticket_code = cb) then msg := msg || '[pending proposal missing] '; end if;
-    if exists (select 1 from public.vw_jason_decision_digest where ticket_code in ('SB-520','SB-549','SB-553','39P-027')) then
-      msg := msg || '[live escalation listed] ';
-    end if;
+    -- each open live no-op escalation is listed exactly once: attached to its subject or as its own row
+    select count(*) into n
+      from public.work_items e
+     where e.ticket_code in ('SB-520','SB-549','SB-553','39P-027') and e.status not in ('done','cancelled') and not e.archived
+       and (select count(*) from public.vw_jason_decision_digest d where d.ticket_code = e.ticket_code)
+           + (select count(*) from public.vw_jason_decision_digest d where e.ticket_code = any(d.escalations_attached)) <> 1;
+    if n <> 0 then msg := msg || format('[live escalations not listed once %s] ', n); end if;
     if exists (select 1 from public.work_items where ticket_code = 'SB-413' and status = 'awaiting_jason' and not archived)
        and not exists (select 1 from public.vw_jason_decision_digest where ticket_code = 'SB-413' and 'SB-520' = any(escalations_attached)) then
       msg := msg || '[SB-413 missing SB-520] ';
@@ -162,8 +178,14 @@ begin
     perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
     set local role authenticated;
     v := public.jason_decision_digest();
+    -- the trigger classifies for authenticated writers too (20261014135317 grants)
+    insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, meta)
+      values (pj, ub, 'ESCALATION: qa-sb554 probe H owner session', 'chore', 'todo', 'low', 'not_required',
+              jsonb_build_object('blocker_ref', ca))
+      returning meta->>'blocker_class' into st;
     reset role;
     perform set_config('request.jwt.claims', '{}', true);
+    if st is distinct from 'human_decision' then msg := msg || format('[owner session class %s] ', coalesce(st, 'none')); end if;
     select count(*) into k from public.vw_jason_decision_digest where user_id = ub;
     if (v->>'total')::int <> k then msg := msg || format('[owner total %s vs %s] ', v->>'total', k); end if;
     r := r || jsonb_build_object('TC-SB554-5', case when msg = '' then 'pass' else 'FAIL: ' || msg end);
@@ -188,7 +210,7 @@ begin
     insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, updated_at)
       values (pj, ub, 'qa-sb554 aging medium', 'chore', 'awaiting_jason', 'medium', 'not_required', now() - interval '1 day')
       returning id, ticket_code into h4, k4;
-    select array_agg(format('%s/%s/%s', aging_threshold_days, aging_breached, waiting_days) order by rank)
+    select array_agg(format('%s/%s/%s', aging_threshold_days, aging_breached::text, waiting_days) order by rank)
       into t
       from public.vw_jason_decision_digest where ticket_code in (k1, k2, k3, k4);
     select string_agg(ticket_code, ',' order by rank) into st2
@@ -241,9 +263,26 @@ begin
                   jsonb_build_object('upstream_ticket', cd));
       exception when others then st2 := sqlstate;
       end;
+      -- an L3 + flagged escalation about an agent subject is not a no-op: accepted
+      st3 := 'ok';
+      begin
+        insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, authority_level, meta)
+          values (pj, ub, 'ESCALATION: qa-sb554 probe C enforce', 'chore', 'backlog', 'high', 'not_required', 3,
+                  jsonb_build_object('upstream_ticket', cd, 'flagged_for_jason', 'true'));
+      exception when others then st3 := sqlstate;
+      end;
+      -- a subject named only through meta.escalates is classified and refused
+      st4 := 'ok';
+      begin
+        insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, meta)
+          values (pj, ub, '  escalation: qa-sb554 escalates enforce', 'chore', 'todo', 'high', 'not_required',
+                  jsonb_build_object('escalates', ca));
+      exception when others then st4 := sqlstate;
+      end;
       r := r || jsonb_build_object('TC-SB554-8', case
-             when st = 'P0554' and msg like 'ESCALATION-003:%' and st2 = 'ok' and public.escalation_gate_mode('x') = 'enforce' then 'pass'
-             else format('FAIL: probe A %s, probe B %s', st, st2) end);
+             when st = 'P0554' and msg like 'ESCALATION-003:%' and st2 = 'ok' and st3 = 'ok' and st4 = 'P0554'
+              and public.escalation_gate_mode('x') = 'enforce' then 'pass'
+             else format('FAIL: probe A %s, probe B %s, probe C %s, escalates %s', st, st2, st3, st4) end);
       raise exception '%', rb;
     exception when others then
       if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB554-8', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
@@ -251,6 +290,37 @@ begin
     if public.escalation_gate_mode('SB-554') <> 'warn' then
       r := r || jsonb_build_object('TC-SB554-8', 'FAIL: gate mode not restored inside the suite');
     end if;
+  end;
+
+  -- ------------------------------------------------ TC-SB554-9: orphan escalations listed once; title and key rules
+  begin
+    msg := '';
+    select ticket_code into cpc from public.work_items where id = pc;
+    select count(*), string_agg(row_kind || '/' || cardinality(escalations_attached), ',') into n, st
+      from public.vw_jason_decision_digest where ticket_code = cpc;
+    if n <> 1 or st is distinct from 'orphan_escalation/0' then msg := msg || format('[probe C rows %s %s] ', n, st); end if;
+    insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, meta)
+      values (pj, ub, '  escalation: qa-sb554 leading space', 'chore', 'todo', 'low', 'not_required', jsonb_build_object('escalates', ca))
+      returning id, ticket_code into pw, cw;
+    insert into public.work_items (project_id, user_id, title, type, status, priority, approval_status, meta)
+      values (pj, ub, 'ESCALATIONS: qa-sb554 plural', 'chore', 'todo', 'low', 'not_required', jsonb_build_object('related', ca))
+      returning id, ticket_code into pp, cp;
+    select array[w.meta->>'blocker_class', p.meta->>'blocker_class'] into t
+      from public.work_items w, public.work_items p where w.id = pw and p.id = pp;
+    if t is distinct from array['human_decision','human_decision'] then msg := msg || format('[classes %s] ', t); end if;
+    if not exists (select 1 from public.vw_jason_decision_digest where ticket_code = ca and escalations_attached @> array[cw, cp]) then
+      msg := msg || '[fixture a missing leading-space / plural escalations] ';
+    end if;
+    if exists (select 1 from public.vw_jason_decision_digest where ticket_code in (cw, cp)) then msg := msg || '[attached listed] '; end if;
+    v := public.jason_decision_digest();
+    if (v->>'orphan_escalations')::int < 1
+       or not exists (select 1 from jsonb_array_elements(v->'items') i
+                       where i->>'ticket_code' = cpc and i->>'row_kind' = 'orphan_escalation') then
+      msg := msg || format('[function orphans %s] ', v->>'orphan_escalations');
+    end if;
+    r := r || jsonb_build_object('TC-SB554-9', case when msg = '' then 'pass' else 'FAIL: ' || msg end);
+  exception when others then
+    r := r || jsonb_build_object('TC-SB554-9', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
   end;
 
   reset role;

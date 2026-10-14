@@ -1,4 +1,4 @@
--- Escalation closure gate suite: TC-SB526-1..7 (SB-526; ADR-FLOW-005 D8).
+-- Escalation closure gate suite: TC-SB526-1..8 (SB-526; ADR-FLOW-005 D8).
 --
 -- Run as postgres. One transaction that always ends by raising, so nothing it creates or
 -- inserts survives. Fixtures are SB-project chores owned by the owner, with ticket codes
@@ -6,6 +6,10 @@
 -- is asserted to succeed with meta.escalation_closure.verdict stamped; TC-1, TC-3 and TC-6 are
 -- then repeated with escalation_gate_mode replaced to return 'enforce' inside a rolled-back
 -- sub-block, asserting sqlstate P0001 and the message prefix.
+-- TC-SB526-8 / 8e pin the pkg-2 verifier fixes: meta and title writes cannot take an escalation
+-- out of scope, repoint its upstream, or rewrite / remove the trigger-owned snapshot and verdict;
+-- a row without a snapshot is pinned by a legacy snapshot on its first write.
+-- TC-SB526-2 and TC-7 pin escalation_upstream_id as SECURITY INVOKER (no cross-owner lookup).
 -- Pass = the raised message starts with "ESCALATION_CLOSURE_GATE PASS". The message carries
 -- only counts, ticket codes, verdicts and sqlstates, never titles or free text.
 
@@ -19,6 +23,7 @@ declare
   u1 uuid; e1 uuid; u2a uuid; u2b uuid; u2c uuid; u2d uuid; u2e uuid; e2a uuid; e2b uuid; e2c uuid; e2d uuid; e2e uuid; e2f uuid;
   u3 uuid; e3 uuid; u4 uuid; e4 uuid; b4 uuid; u4b uuid; e4b uuid; b4b uuid; u4c uuid; e4c uuid;
   u5 uuid; e5 uuid; e5d uuid; e5s uuid; u6 uuid; e6 uuid; u7 uuid; e7 uuid;
+  u8 uuid; d8 uuid; e8a uuid; e8b uuid; e8d uuid; e8e uuid; u8e uuid; f8 uuid; g8 uuid; st2 text; msg2 text;
   t text[]; n int; k int; fails int; st text; msg text; v jsonb; xid uuid;
 begin
   execute $f$create function pg_temp.fx(p_code text, p_title text, p_status text, p_assignee text, p_meta jsonb,
@@ -61,6 +66,15 @@ begin
     if public.escalation_upstream_id('ESCALATION: ZZE-12', '{}', ub, u2c) is null then k := k + 1; end if;           -- never itself
     if public.escalation_upstream_id('ESCALATION: ZZE-12', '{}', gen_random_uuid(), null) is null then k := k + 1; end if; -- other owner
     if public.escalation_upstream_id('ESCALATION: nothing here', '{}', ub, null) is null then k := k + 1; end if;
+    -- SECURITY INVOKER: the owner session resolves its own code but never another owner's
+    select w.ticket_code, w.user_id into msg, xid
+      from public.work_items w where w.user_id <> ub and w.ticket_code ~ '^[A-Z0-9]+-[0-9]+$' order by w.created_at limit 1;
+    perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
+    set local role authenticated;
+    if msg is null or public.escalation_upstream_id(null, jsonb_build_object('upstream_ticket', msg), xid, null) is null then k := k + 1; end if;
+    if public.escalation_upstream_id('ESCALATION: ZZE-12', '{}', ub, null) = u2c then k := k + 1; end if;
+    reset role;
+    perform set_config('request.jwt.claims', '{}', true);
     -- handoff issue type: out of scope (no snapshot, no verdict)
     e2a := pg_temp.fx('ZZE-13', 'ESCALATION: qa-sb526 handoff', 'todo', null, '{"issue_type":"handoff_gap","upstream_ticket":"ZZE-10"}');
     update public.work_items set status = 'done' where id = e2a;
@@ -87,9 +101,10 @@ begin
       (select (meta ? 'escalation_closure')::text || '/' || status from public.work_items where id = e2e)]
       into t;
     r := r || jsonb_build_object('TC-SB526-2', case
-           when k = 6 and t = array['false/false/done','false/false/done','ZZE-11','false/done','false/done'] then 'pass'
-           else format('FAIL: resolution %s of 6, scope %s', k, t) end);
+           when k = 8 and t = array['false/false/done','false/false/done','ZZE-11','false/done','false/done'] then 'pass'
+           else format('FAIL: resolution %s of 8, scope %s', k, t) end);
   exception when others then
+    reset role;
     r := r || jsonb_build_object('TC-SB526-2', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
   end;
 
@@ -213,10 +228,14 @@ begin
       from pg_trigger where tgrelid = 'public.work_items'::regclass
        and tgname in ('trg_done_gate', 'trg_escalation_closure', 'trg_qa_gate');
     if msg = 'trg_done_gate,trg_escalation_closure,trg_qa_gate' then k := k + 1; end if;
-    if (select prosecdef from pg_proc where oid = 'public.escalation_upstream_id(text,jsonb,uuid,uuid)'::regprocedure)
+    if not (select prosecdef from pg_proc where oid = 'public.escalation_upstream_id(text,jsonb,uuid,uuid)'::regprocedure)
        and not has_function_privilege('anon', 'public.escalation_upstream_id(text,jsonb,uuid,uuid)', 'execute') then k := k + 1; end if;
     if public.escalation_gate_mode('SB-526') = 'warn' then k := k + 1; end if;
     if not has_table_privilege('anon', 'public.vw_escalation_closure_audit', 'select') then k := k + 1; end if;
+    if (select array_agg(a.attname::text order by a.attname)
+          from pg_trigger g join pg_attribute a on a.attrelid = g.tgrelid and a.attnum = any(g.tgattr::int2[])
+         where g.tgname = 'trg_escalation_closure' and g.tgrelid = 'public.work_items'::regclass)
+       = array['meta','status','title'] then k := k + 1; end if;
     -- the owner's authenticated session reads the audit
     perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
     set local role authenticated;
@@ -228,11 +247,62 @@ begin
     perform set_config('request.jwt.claims', '{}', true);
     if n = 1 then k := k + 1; end if;
     r := r || jsonb_build_object('TC-SB526-7', case
-           when t = array['ok','violation','held','violation','ok','none','governance_violation'] and k = 7 then 'pass'
-           else format('FAIL: verdicts %s, posture %s of 7', t, k) end);
+           when t = array['ok','violation','held','violation','ok','none','governance_violation'] and k = 8 then 'pass'
+           else format('FAIL: verdicts %s, posture %s of 8', t, k) end);
   exception when others then
     reset role;
     r := r || jsonb_build_object('TC-SB526-7', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
+  end;
+
+  -- ------------------------------------------------ TC-SB526-8: meta / title writes cannot bypass the gate (warn)
+  begin
+    u8 := pg_temp.fx('ZZE-80', 'qa-sb526 upstream 8', 'blocked', null, null);
+    d8 := pg_temp.fx('ZZE-81', 'qa-sb526 finished 8', 'done', qa, null);
+    -- 8a: close and switch issue_type to handoff_gap in one update
+    e8a := pg_temp.fx('ZZE-82', 'ESCALATION: qa-sb526 8a', 'todo', null, '{"upstream_ticket":"ZZE-80"}');
+    update public.work_items set status = 'done', meta = meta || '{"issue_type":"handoff_gap"}' where id = e8a;
+    -- 8b: meta-only repoint to a done ticket, snapshot removed then forged, then close
+    e8b := pg_temp.fx('ZZE-83', 'ESCALATION: qa-sb526 8b', 'todo', null, '{"upstream_ticket":"ZZE-80"}');
+    update public.work_items set meta = (meta - 'escalation_snapshot') || '{"upstream_ticket":"ZZE-81"}' where id = e8b;
+    update public.work_items set meta = meta || '{"escalation_snapshot":{"upstream":"ZZE-81","status":"done"}}' where id = e8b;
+    update public.work_items set status = 'done' where id = e8b;
+    -- 8c: the verdict cannot be removed after the close
+    update public.work_items set meta = meta - 'escalation_closure' where id = e8b;
+    -- 8d: rename away from ESCALATION and strip the upstream key, then close
+    e8d := pg_temp.fx('ZZE-84', 'ESCALATION: qa-sb526 8d', 'todo', null, '{"upstream_ticket":"ZZE-80"}');
+    update public.work_items set title = 'qa-sb526 renamed 8d', meta = meta - 'upstream_ticket' where id = e8d;
+    update public.work_items set status = 'done' where id = e8d;
+    -- 8e: no snapshot at insert (upstream did not exist yet); the first write pins a legacy snapshot
+    e8e := pg_temp.fx('ZZE-85', 'ESCALATION: qa-sb526 8e', 'todo', null, '{"upstream_ticket":"ZZE-86"}');
+    u8e := pg_temp.fx('ZZE-86', 'qa-sb526 upstream 8e', 'blocked', null, null);
+    update public.work_items set meta = meta || '{"upstream_ticket":"ZZE-81"}' where id = e8e;
+    update public.work_items set status = 'done' where id = e8e;
+    -- 8f: caller-supplied trigger-owned keys on a plain insert are stripped
+    f8 := pg_temp.fx('ZZE-87', 'qa-sb526 plain 8f', 'todo', null,
+                     '{"escalation_snapshot":{"upstream":"ZZE-80"},"escalation_closure":{"verdict":"x"}}');
+    -- 8g: a plain row becomes an escalation and closes in one update
+    g8 := pg_temp.fx('ZZE-88', 'qa-sb526 plain 8g', 'todo', null, null);
+    update public.work_items set title = 'ESCALATION: qa-sb526 8g', meta = '{"upstream_ticket":"ZZE-80"}', status = 'done' where id = g8;
+    select array[
+      (select coalesce(meta->'escalation_closure'->>'verdict', 'none') from public.work_items where id = e8a),
+      (select concat_ws('/', meta->'escalation_snapshot'->>'upstream', meta->'escalation_closure'->>'verdict',
+                        meta->'escalation_closure'->>'upstream') from public.work_items where id = e8b),
+      (select concat_ws('/', meta->'escalation_closure'->>'verdict', meta->'escalation_closure'->>'upstream')
+         from public.work_items where id = e8d),
+      (select concat_ws('/', meta->'escalation_snapshot'->>'legacy', meta->'escalation_closure'->>'verdict',
+                        meta->'escalation_closure'->>'upstream') from public.work_items where id = e8e),
+      (select (meta ? 'escalation_snapshot')::text || '/' || (meta ? 'escalation_closure')::text from public.work_items where id = f8),
+      (select concat_ws('/', meta->'escalation_closure'->>'verdict', meta->'escalation_snapshot'->>'upstream')
+         from public.work_items where id = g8),
+      coalesce((select verdict from public.vw_escalation_closure_audit where ticket_code = 'ZZE-84' and row_kind = 'escalation'), 'none'),
+      coalesce((select verdict from public.vw_escalation_closure_audit where ticket_code = 'ZZE-85' and row_kind = 'escalation'), 'none')]
+      into t;
+    r := r || jsonb_build_object('TC-SB526-8', case
+           when t = array['ESCALATION-002','ZZE-80/ESCALATION-002/ZZE-80','ESCALATION-002/ZZE-80','true/ESCALATION-001/ZZE-86',
+                          'false/false','ESCALATION-001/ZZE-80','violation','violation'] then 'pass'
+           else format('FAIL: %s', t) end);
+  exception when others then
+    r := r || jsonb_build_object('TC-SB526-8', 'FAIL: error ' || sqlstate || ' ' || sqlerrm);
   end;
 
   -- ------------------------------------------------ TC-SB526-1e / 3e / 6e: enforce mode raises P0001
@@ -276,6 +346,27 @@ begin
              when st = 'P0001' and msg like 'ESCALATION-001: escalation new row %'
               and not exists (select 1 from public.work_items where title = 'ESCALATION: qa-sb526 escalation 6e') then 'pass'
              else format('FAIL: %s', st) end);
+      -- 8e: the U5 and U7 bypasses are refused
+      xid := pg_temp.fx('ZZE-75', 'qa-sb526 upstream 8e-enforce', 'blocked', null, null);
+      xid := pg_temp.fx('ZZE-77', 'qa-sb526 finished 8e-enforce', 'done', qa, null);
+      xid := pg_temp.fx('ZZE-76', 'ESCALATION: qa-sb526 escalation 8e', 'todo', null, '{"upstream_ticket":"ZZE-75"}');
+      update public.work_items set assignee = qa where ticket_code = 'ZZE-75';
+      st := 'ok'; msg := '';
+      begin
+        update public.work_items set status = 'done', meta = meta || '{"issue_type":"handoff_gap"}' where ticket_code = 'ZZE-76';
+      exception when others then st := sqlstate; msg := sqlerrm;
+      end;
+      update public.work_items set meta = (meta - 'escalation_snapshot') || '{"upstream_ticket":"ZZE-77"}' where ticket_code = 'ZZE-76';
+      st2 := 'ok'; msg2 := '';
+      begin
+        update public.work_items set status = 'done' where ticket_code = 'ZZE-76';
+      exception when others then st2 := sqlstate; msg2 := sqlerrm;
+      end;
+      r := r || jsonb_build_object('TC-SB526-8e', case
+             when st = 'P0001' and msg like 'ESCALATION-001: escalation ZZE-76 %'
+              and st2 = 'P0001' and msg2 like 'ESCALATION-001: escalation ZZE-76 cannot close while upstream ZZE-75 is blocked %'
+              and (select status from public.work_items where ticket_code = 'ZZE-76') = 'todo' then 'pass'
+             else format('FAIL: handoff switch %s, repoint %s', st, st2) end);
       raise exception '%', rb;
     exception when others then
       if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB526-enforce', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;

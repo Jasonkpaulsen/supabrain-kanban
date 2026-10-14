@@ -143,7 +143,8 @@ begin
        and not has_table_privilege('anon', c.oid, 'select') and has_table_privilege('authenticated', c.oid, 'select');
     select count(*) into m from pg_proc p
      where p.oid in ('public.external_wait_clock(jsonb,date)'::regprocedure, 'public.work_item_wait_state(jsonb,date,date)'::regprocedure)
-       and not p.prosecdef and p.proconfig @> array['search_path=public'];
+       and not p.prosecdef and p.proconfig @> array['search_path=public']
+       and has_function_privilege('pg_read_all_data', p.oid, 'execute');
     select count(*) into k from pg_proc p
      where p.oid = 'public.review_sla_sweep()'::regprocedure and p.prosecdef
        and strpos(pg_get_functiondef(p.oid), 'work_item_wait_state(meta, due_date) IS NULL') > 0;

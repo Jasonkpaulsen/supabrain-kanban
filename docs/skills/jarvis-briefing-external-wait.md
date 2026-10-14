@@ -43,8 +43,10 @@ reported as stale or overdue while that window is open.
    lapsed and it is our move. This **is push-worthy**. Put it in the action-required section,
    ranked above an ordinary overdue item of the same priority:
    `<ticket_code>: <external_party> window lapsed <clock_expires> (<-days_to_clock> days ago), follow up or escalate`.
-   These items stay in the stale / overdue counts. `jarvis_ops_metrics.external_clock_expired`
-   counts them.
+   These items count as stale again (`stale_items`, `stale_wip_gt3d`) and, like any other
+   item, as overdue only when `due_date` is before today: a lapsed meta clock with a future
+   `due_date` is not overdue, which is why the first bullet under "Tagging a new wait" sets `due_date` to
+   the clock. `jarvis_ops_metrics.external_clock_expired` counts every expired wait.
 
 4. **`wait_state = 'waiting_no_clock'` (severity `data_quality`)**: the item is tagged as
    waiting but has no valid `external_clock_expires` and no `due_date`. Add a one-line

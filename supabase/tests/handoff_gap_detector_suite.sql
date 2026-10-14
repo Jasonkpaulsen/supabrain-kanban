@@ -1,4 +1,6 @@
--- Handoff-gap detector suite: TC-SB558-1..6 (SB-558; ADR-FLOW-005 D9, SB-376, SB-405).
+-- Handoff-gap detector suite: TC-SB558-1..6 and TC-SB558-8 (SB-558; ADR-FLOW-005 D9, SB-376, SB-405).
+-- TC-SB558-8 (added with 20261014170000) checks the detector end to end: the classifier must get
+-- each row's own design flag, so role_boundary can fire. TC-SB558-7 is a ticket-comment check, run outside this file.
 --
 -- Run as postgres. One transaction that always ends by raising, so nothing survives.
 -- The 14-day window moves daily, so pinned codes are asserted only when they are in the window
@@ -14,6 +16,7 @@ declare
   pinned constant text[] := array['SB-453','SB-456','SB-458','SB-463','SB-464','SB-467','SB-469','SB-503','SB-540'];
   nolink constant text[] := array['SB-453','SB-458','SB-469','SB-527','SB-559'];
   haslink constant text[] := array['SB-529','SB-595'];
+  rolebound constant text[] := array['SB-561','SB-571','SB-583','CLSRM-53'];
 begin
   -- ------------------------------------------------ TC-SB558-1: one signature, short calls resolve, retired closed
   begin
@@ -128,6 +131,38 @@ begin
            else format('FAIL: detector posture %s, classifier posture %s', n, m) end);
   exception when others then
     r := r || jsonb_build_object('TC-SB558-6', 'FAIL: error ' || sqlstate);
+  end;
+
+  -- ------------------------------------------------ TC-SB558-8: end to end, the classifier gets the row's own design flag
+  begin
+    -- every full-call row agrees with the classifier fed the row's own design flag
+    select count(*) into n from public.detect_handoff_gaps('System Architect', 14, false) g
+     where g.finding_type is distinct from public.classify_handoff_finding(
+             g.developed_by, 'System Architect', g.has_downstream_link, g.has_meta_key, g.qa_status,
+             coalesce(g.ticket_type = 'spike'
+               or g.action_category in ('architecture_change','technical_approach_selection','workflow_design','project_plan'), false));
+    -- non-design rows are never design_complete or handoff_gap
+    select count(*) into m from public.detect_handoff_gaps('System Architect', 14, false) g
+     where not coalesce(g.ticket_type = 'spike'
+               or g.action_category in ('architecture_change','technical_approach_selection','workflow_design','project_plan'), false)
+       and g.finding_type in ('design_complete', 'handoff_gap');
+    -- pinned Architect-built, tested, unlinked non-design codes are role_boundary (when present and still eligible)
+    select count(*), count(*) filter (where g.finding_type = 'role_boundary') into k, j
+      from public.detect_handoff_gaps('System Architect', 14, false) g
+     where g.ticket_code = any (rolebound)
+       and g.developed_by = 'System Architect' and g.qa_status = 'tested'
+       and not g.has_downstream_link and not g.has_meta_key;
+    -- the default call is design-only, so it never returns role_boundary or self_contained
+    select count(*) into fails from public.detect_handoff_gaps() d
+     where d.finding_type in ('role_boundary', 'self_contained');
+    -- the verifier's probe: untested non-design Architect work is self_contained, not handoff_gap
+    st := public.classify_handoff_finding('System Architect', 'System Architect', false, false, 'untested', false);
+    r := r || jsonb_build_object('TC-SB558-8', case when n = 0 and m = 0 and k = j and fails = 0 and st = 'self_contained' then 'pass'
+           else format('FAIL: classifier mismatches %s, non-design design/gap rows %s, role_boundary %s of %s, default role_boundary/self_contained %s, probe %s',
+                       n, m, j, k, fails, st) end);
+    r := r || jsonb_build_object('TC-SB558-8.evidence', format('mismatches %s; non-design design/gap %s; role_boundary codes present %s (role_boundary %s)', n, m, k, j));
+  exception when others then
+    r := r || jsonb_build_object('TC-SB558-8', 'FAIL: error ' || sqlstate);
   end;
 
   select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
