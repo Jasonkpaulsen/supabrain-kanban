@@ -118,6 +118,32 @@ async function installWriteStubs(page, seed) {
       return json(route, null);
     }
 
+    // ── RPC: cancel_work_item / reopen_work_item (SB-565) ──
+    // The stub applies the happy path only. The database's rules (reason, note,
+    // authority, parent guard) are covered by supabase/tests/ticket_cancellation_suite.sql;
+    // a test can force a refusal with backend.refuse = { rpc, message }.
+    if (url.includes('/rpc/cancel_work_item') || url.includes('/rpc/reopen_work_item')) {
+      const rpc = url.includes('cancel_work_item') ? 'cancel_work_item' : 'reopen_work_item';
+      const r = state.refuse;
+      if (r && r.rpc === rpc && (!r.status || r.status === (body && body.p_status))) {
+        return json(route, { code: 'P0001', message: r.message }, 400);
+      }
+      const it = state.items.find((i) => i.id === body.p_item_id);
+      if (!it) return json(route, { message: 'Not authorized' }, 403);
+      if (rpc === 'cancel_work_item') {
+        const repl = body.p_replaced_by ? state.items.find((i) => i.ticket_code === body.p_replaced_by) : null;
+        Object.assign(it, {
+          status: 'cancelled', cancel_reason: body.p_reason, cancel_note: body.p_note,
+          cancel_replaced_by: repl ? repl.id : null, cancelled_by: body.p_actor,
+          cancelled_at: new Date().toISOString(), completed_at: null,
+        });
+        return json(route, { ticket_code: it.ticket_code, status: 'cancelled' });
+      }
+      Object.assign(it, { status: body.p_status, cancel_reason: null, cancel_note: null,
+        cancel_replaced_by: null, cancelled_by: null, cancelled_at: null });
+      return json(route, { ticket_code: it.ticket_code, status: it.status });
+    }
+
     // ── work_items ──
     if (url.includes('/rest/v1/work_items')) {
       if (method === 'GET') {

@@ -9,6 +9,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>JARVIS</title>
 <link rel="manifest" href="manifest.json">
+<script src="config.js"></script>
+<script src="cancel-ui.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -480,6 +482,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
   <div class="modal">
     <div class="modal-hdr"><div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px"><span class="modal-ticket-badge" id="m-ticket-badge" style="display:none"></span><span id="m-type-badge" style="display:none"></span><h2 id="m-title" style="flex:1;min-width:0">New Item</h2></div><button class="modal-x" id="m-close">&times;</button></div>
     <div class="modal-body">
+      <div class="cx-banner" id="m-cx-banner"></div>
       <div class="m-row"><label>Title</label><input id="m-name"></div>
       <div class="m-row"><label>Description</label><textarea id="m-desc"></textarea></div>
       <div class="m-row-2"><div class="m-row"><label>Project</label><select id="m-proj"></select></div><div class="m-row"><label>Status</label><div style="display:flex;align-items:center"><span class="status-dot" id="m-status-dot"></span><select id="m-status" style="flex:1"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div></div>
@@ -488,7 +491,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 <div class="m-row"><label>Labels</label><div class="m-labels" id="m-labels"></div></div>
       <div class="comments-s" id="cmt-s" style="display:none"><h3>Comments</h3><div id="cmt-list"></div><div class="comment-row"><input id="cmt-in" placeholder="Add comment..."><button class="btn btn-p" id="btn-cmt" style="padding:8px 12px">&#10148;</button></div></div>
       <div class="modal-timestamps" id="m-timestamps" style="display:none"><span id="m-created"></span><span id="m-updated"></span></div>
-<div class="m-actions"><button class="btn btn-del" id="btn-del" style="display:none">Delete</button><button class="btn" id="btn-cancel">Cancel</button><button class="btn btn-p" id="btn-save">Save</button></div>
+<div class="m-actions"><button class="btn btn-del" id="btn-del" style="display:none">Delete</button><button class="cx-btn" id="btn-cx" style="display:none">Cancel ticket…</button><button class="btn" id="btn-cancel">Cancel</button><button class="btn btn-p" id="btn-save">Save</button></div>
     </div>
   </div>
 </div>
@@ -502,15 +505,16 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 </div>
 
 <script>
-var SB_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
-var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+var SB_URL=window.SB_CONFIG.url;   // SB-182: see config.js
+var SB_KEY = window.SB_CONFIG.key;
 var sb=window.supabase.createClient(SB_URL,SB_KEY);
-var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28',gambling:'#f85149','prediction-markets':'#f85149'};
-var DL_FALLBACK=['products','business','career','property','operations','family','hobbies','club','gambling'];
+var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922',operations:'#f778ba',family:'#3fb950',hobbies:'#e3b341',club:'#db6d28','prediction-markets':'#f85149'};
+var DL_FALLBACK=['products','business','career','property','operations','family','hobbies','club'];
 var DL=DL_FALLBACK; // overridden dynamically from briefing data
-var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
-var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950'};
-var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done'};
+/* SB-565: cancelled is a terminal status after done (ADR-FLOW-004, spec SB-564). */
+var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done','cancelled'];
+var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950',cancelled:'#6e7681'};
+var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done',cancelled:'Cancelled'};
 /* SB-348 — the handler that recolours #m-status-dot used to be assigned inside
    openNewModal() only. openModal() (the edit path) set the initial colour but
    never bound the handler, so changing status on an existing card left the
@@ -734,10 +738,10 @@ function renderPulseTabs(pulse){
 /* SB-205: Project pills rendering */
 function renderProjPills(){
 var cont=document.getElementById('proj-pills');if(!cont)return;
-var allCount=items.length;
+var allCount=items.filter(function(i){return i.status!=='cancelled';}).length;   // SB-565
 var h='<button class="proj-pill'+(curProj==='all'?' active':'')+'" data-id="all">All <span class="pill-count">'+allCount+'</span></button>';
 projects.forEach(function(p){
-var cnt=items.filter(function(i){return i.project_id===p.id;}).length;
+var cnt=items.filter(function(i){return i.project_id===p.id&&i.status!=='cancelled';}).length;
 if(cnt===0)return;
 h+='<button class="proj-pill'+(curProj===p.id?' active':'')+'" data-id="'+p.id+'">'+esc((p.icon||'')+' '+(p.key||p.name))+'<span class="pill-count">'+cnt+'</span></button>';
 });
@@ -803,7 +807,8 @@ function renderBoardContent(){
   document.getElementById('fd-count').textContent=filtered.length+' of '+scope.length+' shown';
 }
 function renderBoardStats(){
-  var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
+  /* SB-565: a cancelled ticket is neither delivered nor open, so it leaves the totals. */
+  var scope=items.filter(function(i){return (curProj==='all'||i.project_id===curProj)&&i.status!=='cancelled';});
   var total=scope.length,byS={backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},unas=0;
   scope.forEach(function(it){if(byS[it.status]!==undefined)byS[it.status]++;if(!it.agent_name)unas++;});
   var flight=byS.todo+byS.in_progress+byS.review+byS.escalated,dp=total?Math.round(byS.done/total*100):0;
@@ -817,7 +822,7 @@ function renderBoardStats(){
   document.getElementById('seg-p').style.width=w(byS.in_progress)+'%';
 }
 function renderAgents(){
-  var scope=items.filter(function(i){return curProj==='all'||i.project_id===curProj;});
+  var scope=items.filter(function(i){return (curProj==='all'||i.project_id===curProj)&&i.status!=='cancelled';});
   var byA={},unas=0;
   scope.forEach(function(it){if(!it.assigned_agent_id){unas++;return;}var g=byA[it.assigned_agent_id]||(byA[it.assigned_agent_id]={total:0,st:{backlog:0,todo:0,in_progress:0,on_hold:0,blocked:0,review:0,escalated:0,done:0},name:it.agent_name,icon:it.agent_icon});g.total++;if(g.st[it.status]!==undefined)g.st[it.status]++;});
   var ids=Object.keys(byA);ids.sort(function(a,b){return(byA[b].total-byA[b].st.done)-(byA[a].total-byA[a].st.done);});
@@ -860,7 +865,7 @@ if(!filtered.length)h='<div class="cards-empty">No items in '+STAT_NAMES[curCol]
 filtered.forEach(function(it){
 var dom=iDom(it),stripe=dom?(DC[dom]||'var(--tx-d)'):'var(--tx-d)';
 var lbs='';if(it.labels&&it.labels.length)it.labels.forEach(function(lb){lbs+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">📅 '+it.due_date+'</span>';}
+var dueH='';if(it.due_date){var ov=new Date(it.due_date)<new Date()&&curCol!=='done'&&curCol!=='cancelled'&&curCol!=='on_hold'&&curCol!=='blocked';dueH='<span style="'+(ov?'color:var(--red)':'')+'">📅 '+it.due_date+'</span>';}
 var cmtH=it.comment_count>0?'<span>💬 '+it.comment_count+'</span>':'';
 /* SB-203: Assignee chip */
 var assigneeH='';
@@ -874,7 +879,7 @@ var subH='';if(it.child_count>0){var allDone=it.completed_child_count>=it.child_
 /* SB-207: Dependency indicator */
 var depH='';if(it.blocked_by_count>0){depH='<span class="dep-indicator">🔗 '+it.blocked_by_count+' dep'+(it.blocked_by_count>1?'s':'')+'</span>';}
 /* Build card HTML */
-h+='<div class="card'+(it.archived?' archived':'')+'" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
+h+='<div class="card'+(it.archived?' archived':'')+(it.status==='cancelled'?' cancelled':'')+'" data-id="'+it.id+'"><span class="stripe" style="background:'+stripe+'"></span><div class="card-meta">';
 /* SB-202: Ticket code FIRST (before priority dot), monospace */
 if(it.ticket_code)h+='<span class="card-code">'+esc(it.ticket_code)+'</span>';
 /* ADR-FLOW-003: archived badge */
@@ -886,12 +891,12 @@ h+='<span class="pri-dot pri-'+esc(it.priority)+'"></span>';
 /* SB-207: Type badge for non-task types */
 if(it.type&&it.type!=='task'){var _tc={bug:'type-bug',user_story:'type-story',epic:'type-epic'};var _tn={bug:'Bug',user_story:'Story',epic:'Epic'};h+='<span class="type-badge '+(_tc[it.type]||'')+'">'+esc(_tn[it.type]||it.type)+'</span>';}
 /* SB-207: Unacknowledged badge */
-if(it.acknowledged===false&&(it.priority==='critical'||it.priority==='high')){h+='<span class="new-badge">NEW</span>';}
+if(it.status!=='cancelled'&&it.acknowledged===false&&(it.priority==='critical'||it.priority==='high')){h+='<span class="new-badge">NEW</span>';}
 if(!singleP)h+='<span class="card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span>';
 /* SB-204: Status badge (pushed right with margin-left:auto) */
 var _sc=STAT_COLORS[it.status]||'#8b949e';h+='<span class="status-badge" style="color:'+_sc+';background:'+_sc+'26">'+esc(STAT_NAMES[it.status]||it.status)+'</span>';
 h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
-h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+subH+depH+'</div><div style="display:flex;align-items:center;gap:4px">'+assigneeH+agH+'</div></div></div>';
+h+='<div class="card-title">'+esc(it.title)+'</div>'+CancelUI.reasonLine(it)+'<div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+subH+depH+'</div><div style="display:flex;align-items:center;gap:4px">'+assigneeH+agH+'</div></div></div>';
 });
 area.innerHTML=h;
 area.querySelectorAll('.card').forEach(function(el){
@@ -904,11 +909,18 @@ el.addEventListener('touchmove',function(){clearTimeout(timer);});
 }
 function openMoveSheet(itemId){moveItem=items.find(function(i){return i.id===itemId;});if(!moveItem)return;
   document.getElementById('move-title').textContent='Move: '+esc((moveItem.ticket_code||'')+' '+(moveItem.title||'').substring(0,30));
-  var h='';STATUSES.forEach(function(st){h+='<button class="move-opt'+(st===moveItem.status?' current':'')+'" data-st="'+st+'"><span class="mo-dot" style="background:'+STAT_COLORS[st]+'"></span>'+STAT_NAMES[st]+'</button>';});
+  /* SB-565: a status change never cancels (the reason is required), so Cancelled is
+     not a move target. A cancelled ticket offers only Reopen. */
+  var h='';
+  if(moveItem.status==='cancelled'){h='<button class="move-opt" id="move-reopen"><span class="mo-dot" style="background:'+STAT_COLORS.backlog+'"></span>Reopen</button>';}
+  else{STATUSES.forEach(function(st){if(st==='cancelled')return;h+='<button class="move-opt'+(st===moveItem.status?' current':'')+'" data-st="'+st+'"><span class="mo-dot" style="background:'+STAT_COLORS[st]+'"></span>'+STAT_NAMES[st]+'</button>';});
+    h+='<button class="move-opt" id="move-cx" style="color:var(--red)"><span class="mo-dot" style="background:'+STAT_COLORS.cancelled+'"></span>Cancel ticket…</button>';}
   document.getElementById('move-opts').innerHTML=h;
   document.getElementById('move-bg').classList.add('open');
   document.getElementById('move-sheet').classList.add('open');
-  document.querySelectorAll('.move-opt').forEach(function(b){b.addEventListener('click',async function(){
+  var _cx=document.getElementById('move-cx');if(_cx)_cx.addEventListener('click',function(){var it=moveItem;closeMoveSheet();CancelUI.openCancel(it);});
+  var _ro=document.getElementById('move-reopen');if(_ro)_ro.addEventListener('click',function(){var it=moveItem;closeMoveSheet();CancelUI.reopen(it);});
+  document.querySelectorAll('.move-opt[data-st]').forEach(function(b){b.addEventListener('click',async function(){
     if(b.dataset.st===moveItem.status){closeMoveSheet();return;}
     if(offlineGuard()){closeMoveSheet();return;}
     try{var h=await hdr();var r=await fetch(SB_URL+'/rest/v1/rpc/move_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:moveItem.id,p_new_status:b.dataset.st,p_new_sort_order:0})});if(!r.ok)throw new Error(await r.text());
@@ -1009,6 +1021,7 @@ function openNewModal(st){
   document.getElementById('m-due').value='';document.getElementById('m-assignee').value='';document.getElementById('m-ticket-badge').style.display='none';document.getElementById('m-type-badge').style.display='none';document.getElementById('m-timestamps').style.display='none';document.getElementById('m-status-dot').style.background=STAT_COLORS['backlog']||'#8b949e';
   if(curProj!=='all')document.getElementById('m-proj').value=curProj;
   document.getElementById('btn-del').style.display='none';document.getElementById('cmt-s').style.display='none';
+  CancelUI.syncModal(null,CX_IDS);
   renderLabelChips([]);document.getElementById('modal-bg').classList.add('open');
 }
 async function openModal(itemId){
@@ -1017,7 +1030,7 @@ async function openModal(itemId){
   document.getElementById('m-name').value=it.title||'';document.getElementById('m-desc').value=it.description||'';
   document.getElementById('m-proj').value=it.project_id;document.getElementById('m-status').value=it.status;
   document.getElementById('m-pri').value=it.priority;document.getElementById('m-assignee').value=it.assignee||'';document.getElementById('m-due').value=it.due_date||'';
-  document.getElementById('btn-del').style.display='inline-flex';var _sd=document.getElementById('m-status-dot');_sd.style.background=STAT_COLORS[it.status]||'#8b949e';
+  document.getElementById('btn-del').style.display='inline-flex';var _sd=document.getElementById('m-status-dot');_sd.style.background=STAT_COLORS[it.status]||'#8b949e';CancelUI.syncModal(it,CX_IDS);
   renderLabelChips((it.labels||[]).map(function(l){return l.id;}));
   var _ts=document.getElementById('m-timestamps');if(it.created_at||it.updated_at){_ts.style.display='flex';document.getElementById('m-created').innerHTML=it.created_at?'⏰ Created: '+new Date(it.created_at).toLocaleDateString()+' '+new Date(it.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';document.getElementById('m-updated').innerHTML=it.updated_at?'✏ Updated: '+new Date(it.updated_at).toLocaleDateString()+' '+new Date(it.updated_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';}else{_ts.style.display='none';}document.getElementById('cmt-s').style.display='block';await loadComments(itemId);
   document.getElementById('modal-bg').classList.add('open');
@@ -1043,7 +1056,7 @@ document.getElementById('btn-cmt').addEventListener('click',async function(){
 document.getElementById('btn-save').addEventListener('click',async function(){
   if(offlineGuard())return;
   var title=document.getElementById('m-name').value.trim();if(!title){toast('Title required','error');return;}
-  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-proj').value,status:document.getElementById('m-status').value,priority:document.getElementById('m-pri').value,due_date:document.getElementById('m-due').value||null,assignee:document.getElementById('m-assignee').value.trim()||null,updated_at:new Date().toISOString()};
+  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-proj').value,status:(editItem&&editItem.status==='cancelled')?'cancelled':document.getElementById('m-status').value,priority:document.getElementById('m-pri').value,due_date:document.getElementById('m-due').value||null,assignee:document.getElementById('m-assignee').value.trim()||null,updated_at:new Date().toISOString()};
   var selLbls=[];document.querySelectorAll('#m-labels .m-lbl.sel').forEach(function(c){selLbls.push(c.dataset.id);});
   try{var h=await hdr();var itemId;
     if(editItem){var r=await fetch(SB_URL+'/rest/v1/work_items?id=eq.'+editItem.id,{method:'PATCH',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)});if(!r.ok)throw new Error('Update failed');itemId=editItem.id;}
@@ -1063,6 +1076,12 @@ document.getElementById('btn-del').addEventListener('click',async function(){
   }catch(e){toast('Delete error: '+e.message,'error');}
 });
 function closeModal(){document.getElementById('modal-bg').classList.remove('open');editItem=null;}
+/* SB-565: cancel / reopen (shared implementation in cancel-ui.js). */
+var CX_IDS={banner:'m-cx-banner',button:'btn-cx',status:'m-status'};
+CancelUI.init({url:SB_URL,headers:hdr,toast:toast,reload:loadAll,offline:offlineGuard,
+  items:function(){return items;},
+  actor:async function(){try{var u=(await sb.auth.getUser()).data.user;return (u&&u.user_metadata&&(u.user_metadata.name||u.user_metadata.full_name))||(u&&u.email)||'Jason';}catch(e){return 'Jason';}}});
+document.getElementById('btn-cx').addEventListener('click',function(){var it=editItem,mode=this.dataset.mode;if(!it)return;closeModal();if(mode==='reopen')CancelUI.reopen(it);else CancelUI.openCancel(it);});
 document.getElementById('m-close').addEventListener('click',closeModal);
 document.getElementById('btn-cancel').addEventListener('click',closeModal);
 document.getElementById('modal-bg').addEventListener('click',function(e){if(e.target===this)closeModal();});

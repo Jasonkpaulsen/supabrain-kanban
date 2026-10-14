@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>JARVIS</title>
+<script src="config.js"></script>
+<script src="cancel-ui.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -217,7 +219,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .column-count { font-size: 11px; font-weight: 600; background: var(--card-bg); color: var(--text-muted); padding: 2px 8px; border-radius: 10px; }
 .column-body { padding: 8px; overflow-y: auto; flex: 1; min-height: 60px; }
 .column.drag-over { border-color: var(--accent-blue); box-shadow: 0 0 0 1px var(--accent-blue) inset; }
-.col-backlog .column-title { color: #8b949e; } .col-todo .column-title { color: #58a6ff; } .col-in_progress .column-title { color: #8b5cf6; } .col-on_hold .column-title { color: #a371f7; } .col-blocked .column-title { color: #f85149; } .col-review .column-title { color: #d29922; } .col-escalated .column-title { color: #f0883e; } .col-done .column-title { color: #3fb950; }
+.col-backlog .column-title { color: #8b949e; } .col-todo .column-title { color: #58a6ff; } .col-in_progress .column-title { color: #8b5cf6; } .col-on_hold .column-title { color: #a371f7; } .col-blocked .column-title { color: #f85149; } .col-review .column-title { color: #d29922; } .col-escalated .column-title { color: #f0883e; } .col-done .column-title { color: #3fb950; } .col-cancelled .column-title { color: #6e7681; }
 .col-empty { font-size: 12px; color: var(--text-dim); text-align: center; padding: 16px 8px; }
 
 .card { position: relative; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px 12px 11px 15px; margin-bottom: 8px; cursor: grab; transition: all 0.15s; user-select: none; overflow: hidden; }
@@ -411,7 +413,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="util-scroll-wrap" id="util-scroll-wrap"><div class="util-grid" id="util-grid"></div></div>
     </div>
     <div class="filter-bar">
-      <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span></div>
+      <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span><span class="chip" data-status="cancelled">Cancelled</span></div>
       <div class="filter-group" id="domain-chips"><span class="grp-label">Domain</span><span class="chip active" data-domain="all" style="background:var(--card-bg)">All</span></div>
       <div class="filter-group" id="archived-chips"><span class="grp-label">Archived</span><span class="chip" id="chip-archived">Show archived</span></div>
       <select class="filter-select" id="priority-filter"><option value="all">All priorities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
@@ -432,6 +434,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="column col-review" data-status="review"><div class="column-header"><span class="column-title">Review</span><span class="column-count" id="count-review">0</span></div><div class="column-body" id="col-review"></div></div>
       <div class="column col-escalated" data-status="escalated"><div class="column-header"><span class="column-title">Escalated</span><span class="column-count" id="count-escalated">0</span></div><div class="column-body" id="col-escalated"></div></div>
       <div class="column col-done" data-status="done"><div class="column-header"><span class="column-title">Done</span><span class="column-count" id="count-done">0</span></div><div class="column-body" id="col-done"></div></div>
+      <div class="column col-cancelled" data-status="cancelled"><div class="column-header"><span class="column-title">Cancelled</span><span class="column-count" id="count-cancelled">0</span></div><div class="column-body" id="col-cancelled"></div></div>
     </div>
   </div>
 </div>
@@ -441,6 +444,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   <div class="modal">
     <div class="modal-header"><div class="modal-title-wrap"><span class="modal-ticket-badge" id="m-ticket-badge" style="display:none"></span><span class="modal-type-badge" id="m-type-badge" style="display:none"></span><h2 id="modal-title">New Work Item</h2></div><button class="modal-close" id="modal-close">&times;</button></div>
     <div class="modal-body">
+      <div class="cx-banner" id="m-cx-banner"></div>
       <div class="modal-row"><div class="modal-field"><label>Title</label><input id="m-title" placeholder="What needs to be done?"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Description</label><textarea id="m-desc" placeholder="Details, context, acceptance criteria..."></textarea></div></div>
       <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><div class="status-select-wrap"><span class="status-dot" id="m-status-dot"></span><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div></div>
@@ -448,7 +452,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="modal-row"><div class="modal-field"><label>Labels</label><div class="modal-labels" id="m-labels"></div></div></div>
       <div class="comments-section" id="comments-section" style="display:none"><h3>Comments</h3><div id="comments-list"></div><div class="comment-input-row"><input id="comment-input" placeholder="Add a comment..."><button class="btn btn-primary" id="btn-add-comment">Add</button></div></div>
       <div class="modal-timestamps" id="m-timestamps" style="display:none"><span id="m-created"></span><span id="m-updated"></span></div>
-      <div class="modal-actions"><button class="btn btn-delete" id="btn-delete-item" style="display:none;margin-right:auto">Delete</button><button class="btn" id="btn-cancel-modal">Cancel</button><button class="btn btn-primary" id="btn-save-modal">Save</button></div>
+      <div class="modal-actions"><button class="btn btn-delete" id="btn-delete-item" style="display:none;margin-right:auto">Delete</button><button class="cx-btn" id="btn-cx" style="display:none">Cancel ticket…</button><button class="btn" id="btn-cancel-modal">Cancel</button><button class="btn btn-primary" id="btn-save-modal">Save</button></div>
     </div>
   </div>
 </div>
@@ -457,19 +461,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 /* ═══════════════════════════════════════════════════
    SHARED — Auth, data, helpers
    ═══════════════════════════════════════════════════ */
-var SUPABASE_URL = 'https://hzqqvbvhnzmgqivfigej.supabase.co';
-var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+var SUPABASE_URL = window.SB_CONFIG.url;   // SB-182: see config.js
+var SUPABASE_KEY = window.SB_CONFIG.key;
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', gambling:'#f85149', 'prediction-markets':'#f85149' };
+var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', property:'#d29922', operations:'#f778ba', family:'#3fb950', hobbies:'#e3b341', club:'#db6d28', 'prediction-markets':'#f85149' };
 /* SB-353 — the status palette as data. These values already existed in three
    places in the stylesheet (.col-* .column-title, .ac-bar .b-*, the old
    .status-badge variants); the card badge needs them at runtime to colour all
    eight statuses, and SB-355 will need them again for the modal indicator.
    Kept identical to jarvis-pwa.html:506-507 so the two surfaces cannot drift. */
-var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950' };
-var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done' };
-var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club','gambling'];
+var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950', cancelled:'#6e7681' };
+var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done', cancelled:'Cancelled' };
+var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club'];
 var DOMAIN_LIST = DOMAIN_LIST_FALLBACK; // overridden dynamically from briefing data
 var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
 
@@ -654,6 +658,7 @@ function renderJarvisStats(){
   var activeDom=getActiveDomain();
   var scope=allItems.filter(function(it){
     if(activeDom!=='all' && itemDomain(it)!==activeDom) return false;
+    if(it.status==='cancelled') return false;   // SB-565: never counted as work
     return true;
   });
   var total=scope.length;
@@ -764,9 +769,9 @@ function projectShortKey(p){
 function renderProjectPills(){
   var cont=document.getElementById('proj-pills'); if(!cont) return;
   var h='<button class="proj-pill'+(currentProject==='all'?' active':'')+'" data-id="all" title="All Projects">All'
-       +'<span class="pill-count">'+allItems.length+'</span></button>';
+       +'<span class="pill-count">'+allItems.filter(function(i){return i.status!=='cancelled';}).length+'</span></button>';   // SB-565
   allProjects.forEach(function(p){
-    var cnt=allItems.filter(function(i){return i.project_id===p.id;}).length;
+    var cnt=allItems.filter(function(i){return i.project_id===p.id&&i.status!=='cancelled';}).length;
     h+='<button class="proj-pill'+(currentProject===p.id?' active':'')+'" data-id="'+p.id+'" title="'+esc(p.name)+'">'
       +esc((p.icon||'')+' '+projectShortKey(p))+'<span class="pill-count">'+cnt+'</span></button>';
   });
@@ -877,9 +882,12 @@ async function toggleAgentAutomation(btn){
   btn.disabled=false;
 }
 function renderBoard(){
-  var statuses=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
+  /* SB-565: Cancelled is the last column (spec SB-564). */
+  var statuses=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done','cancelled'];
   var scope=allItems.filter(function(i){return currentProject==='all'||i.project_id===currentProject;});
-  renderBoardStats(scope); renderUtilization(scope); renderProjAutoToggle();
+  /* SB-565: cancelled tickets leave every total and agent bar. */
+  var liveScope=scope.filter(function(i){return i.status!=='cancelled';});
+  renderBoardStats(liveScope); renderUtilization(liveScope); renderProjAutoToggle();
   var filtered=filterItems();
   document.getElementById('result-count').textContent=filtered.length+' of '+scope.length+' shown';
   var singleProject=currentProject!=='all';
@@ -893,7 +901,7 @@ function renderBoard(){
     items.forEach(function(item){
       var dom=itemDomain(item), stripe=dom?(DOMAIN_COLORS[dom]||'var(--text-dim)'):'var(--text-dim)';
       var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-      var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
+      var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='cancelled'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
       var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
       /* SB-352 — the agent chip no longer doubles as the unassigned marker.
          An item with a human assignee and no agent is assigned, so it must not
@@ -928,7 +936,7 @@ function renderBoard(){
       /* SB-354 — attention marker. High and critical only: an unacknowledged
          low-priority item is not news, and badging everything would make the
          badge mean nothing. */
-      var slotNew=(item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
+      var slotNew=(item.status!=='cancelled'&&item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
                   ?'<span class="new-badge">NEW</span>':'';
 
       /* SB-354 — subtask progress. Both counts already arrive via select=*. */
@@ -978,14 +986,14 @@ function renderBoard(){
       var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
       var footRight=[slotAssignee, agentHtml];
 
-      html+='<div class="card'+(item.archived?' archived':'')+'" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
+      html+='<div class="card'+(item.archived?' archived':'')+(item.status==='cancelled'?' cancelled':'')+'" draggable="'+(item.status==='cancelled'?'false':'true')+'" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
       html+='<div class="card-meta">'+meta.join('')+'</div>';
       if(labels) html+='<div class="card-labels">'+labels+'</div>';
-      html+='<div class="card-title">'+esc(item.title)+'</div>';
+      html+='<div class="card-title">'+esc(item.title)+'</div>'+CancelUI.reasonLine(item);
       html+='<div class="card-footer"><div class="card-footer-left">'+footLeft.join('')+'</div>'
            +'<div class="card-footer-right">'+footRight.join('')+'</div></div></div>';
     });
-    html+='<button class="add-card-btn" data-status="'+st+'">+ Add card</button>';
+    if(st!=='cancelled') html+='<button class="add-card-btn" data-status="'+st+'">+ Add card</button>';
     col.innerHTML=html;
   });
   bindCardEvents();
@@ -1014,6 +1022,8 @@ function bindColumnEvents(){
     column.addEventListener('dragleave',function(e){if(!column.contains(e.relatedTarget))column.classList.remove('drag-over');});
     column.addEventListener('drop',async function(e){
       e.preventDefault(); column.classList.remove('drag-over'); if(!dragItem)return;
+      /* SB-565: cancelling needs a reason, so a drop on Cancelled opens the dialog. */
+      if(column.dataset.status==='cancelled'){var _cx=allItems.find(function(i){return i.id===dragItem;}); CancelUI.openCancel(_cx); return;}
       var newStatus=column.dataset.status, body=column.querySelector('.column-body'), newOrder=body?body.querySelectorAll('.card').length:0;
       try{var h=await getHeaders(); var res=await fetch(SUPABASE_URL+'/rest/v1/rpc/move_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:dragItem,p_new_status:newStatus,p_new_sort_order:newOrder})}); if(!res.ok){throw await serverError(res,'Move failed');}
 
@@ -1118,7 +1128,7 @@ function openNewModal(status){
   document.getElementById('m-assignee').value=''; document.getElementById('m-due').value='';
   if(currentProject!=='all')document.getElementById('m-project').value=currentProject;
   document.getElementById('btn-delete-item').style.display='none'; document.getElementById('comments-section').style.display='none';
-  setModalIdentity(null); syncStatusDot();
+  setModalIdentity(null); syncStatusDot(); CancelUI.syncModal(null,CX_IDS);
   renderLabelChips([]); document.getElementById('modal-overlay').classList.add('active');
 }
 async function openModal(itemId){
@@ -1129,7 +1139,7 @@ async function openModal(itemId){
   document.getElementById('m-priority').value=item.priority; document.getElementById('m-assignee').value=item.assignee||'';
   document.getElementById('m-due').value=item.due_date||''; document.getElementById('btn-delete-item').style.display='inline-flex';
   renderLabelChips((item.labels||[]).map(function(l){return l.id;}));
-  setModalIdentity(item); syncStatusDot();
+  setModalIdentity(item); syncStatusDot(); CancelUI.syncModal(item,CX_IDS);
   document.getElementById('comments-section').style.display='block'; await loadComments(itemId);
   document.getElementById('modal-overlay').classList.add('active');
 }
@@ -1152,7 +1162,7 @@ document.getElementById('btn-add-comment').addEventListener('click',async functi
 });
 document.getElementById('btn-save-modal').addEventListener('click',async function(){
   var title=document.getElementById('m-title').value.trim(); if(!title){toast('Title is required','error');return;}
-  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-project').value,status:document.getElementById('m-status').value,priority:document.getElementById('m-priority').value,assignee:document.getElementById('m-assignee').value.trim()||null,due_date:document.getElementById('m-due').value||null,updated_at:new Date().toISOString()};
+  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-project').value,status:(editingItem&&editingItem.status==='cancelled')?'cancelled':document.getElementById('m-status').value,priority:document.getElementById('m-priority').value,assignee:document.getElementById('m-assignee').value.trim()||null,due_date:document.getElementById('m-due').value||null,updated_at:new Date().toISOString()};
   var selectedLabels=[]; document.querySelectorAll('#m-labels .label-chip.selected').forEach(function(c){selectedLabels.push(c.dataset.id);});
   try{var h=await getHeaders(); var itemId, storedStatus=null;
     if(editingItem){var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'PATCH',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw await serverError(res,'Update failed'); var urows=await res.json(); itemId=editingItem.id; storedStatus=(urows&&urows[0])?urows[0].status:null;}
@@ -1178,6 +1188,14 @@ document.getElementById('btn-delete-item').addEventListener('click',async functi
   }catch(err){toast('Delete error: '+err.message,'error');}
 });
 function closeModal(){document.getElementById('modal-overlay').classList.remove('active');editingItem=null;}
+/* SB-565: cancel / reopen (shared implementation in cancel-ui.js). */
+var CX_IDS={banner:'m-cx-banner',button:'btn-cx',status:'m-status'};
+CancelUI.init({url:SUPABASE_URL,headers:getHeaders,reload:loadAll,
+  toast:function(m,t){toast(m,t||'success');},
+  offline:function(){if(navigator.onLine===false){toast('Offline — changes are locked','error');return true;}return false;},
+  items:function(){return allItems;},
+  actor:async function(){try{var u=(await sb.auth.getUser()).data.user;return (u&&u.user_metadata&&(u.user_metadata.name||u.user_metadata.full_name))||(u&&u.email)||'Jason';}catch(e){return 'Jason';}}});
+document.getElementById('btn-cx').addEventListener('click',function(){var it=editingItem,mode=this.dataset.mode;if(!it)return;closeModal();if(mode==='reopen')CancelUI.reopen(it);else CancelUI.openCancel(it);});
 document.getElementById('modal-close').addEventListener('click',closeModal);
 document.getElementById('btn-cancel-modal').addEventListener('click',closeModal);
 document.getElementById('modal-overlay').addEventListener('click',function(e){if(e.target===this)closeModal();});

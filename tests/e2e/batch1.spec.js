@@ -287,8 +287,10 @@ test('@batch1 TC-SB109 8 columns render with correct colors and counts', async (
     await expect(page.locator(`#col-${status} .col-empty`)).toHaveText('—');
   }
 
-  // Step 5: every column offers "+ Add card".
-  await expect(page.locator('.add-card-btn')).toHaveCount(order.length);
+  // Step 5: every column offers "+ Add card" — except Cancelled, since no ticket
+  // can be created as cancelled (SB-565, spec SB-564 §4).
+  await expect(page.locator('.add-card-btn')).toHaveCount(order.length - 1);
+  await expect(page.locator('.add-card-btn[data-status="cancelled"]')).toHaveCount(0);
 
   // Expected: 300px min-width and a viewport-derived max height.
   const first = columns.first();
