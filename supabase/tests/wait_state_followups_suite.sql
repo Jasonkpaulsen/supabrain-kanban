@@ -41,6 +41,9 @@ begin
     if public.external_wait_data_quality('{"awaiting_external":{"name":"x"},"external_clock_expires":"2026-11-06"}', null) is distinct from 'non_text_party' then msg := msg || 'object '; end if;
     if public.external_wait_data_quality('{"awaiting_external":["x"]}', d) is distinct from 'non_text_party' then msg := msg || 'array '; end if;
     if public.external_wait_data_quality('{"awaiting_external":"P"}', null) is distinct from 'no_clock' then msg := msg || 'no-clock '; end if;
+    -- precedence: invalid_clock, then non_text_party, then no_clock
+    if public.external_wait_data_quality('{"awaiting_external":{"name":"x"},"external_clock_expires":"soon"}', d) is distinct from 'invalid_clock' then msg := msg || 'object+invalid '; end if;
+    if public.external_wait_data_quality('{"awaiting_external":{"name":"x"}}', null) is distinct from 'non_text_party' then msg := msg || 'object+noclock '; end if;
     if public.external_wait_data_quality('{"awaiting_external":"P"}', d) is not null then msg := msg || 'clean-due '; end if;
     if public.external_wait_data_quality(jsonb_build_object('awaiting_external', 'P', 'external_clock_expires', (d + 5)::text), null) is not null then msg := msg || 'clean-meta '; end if;
     if public.external_wait_data_quality('{"awaiting_external":true}', d) is not null then msg := msg || 'json-true '; end if;
@@ -58,14 +61,18 @@ begin
       perform pg_temp.fx('ZZF-8', 'in_progress', null, jsonb_build_object('awaiting_external', '{"name":"x"}'::jsonb, 'external_clock_expires', (d + 5)::text));
       perform pg_temp.fx('ZZF-9', 'in_progress', d - 2, '{"awaiting_external":"Agency","external_clock_expires":"soon"}');
       perform pg_temp.fx('ZZF-10', 'in_progress', null, jsonb_build_object('awaiting_external', 'Agency', 'external_clock_expires', (d + 5)::text));
+      perform pg_temp.fx('ZZF-11', 'in_progress', null, '{"awaiting_external":"Agency","external_clock_expires":"soon"}');
+      perform pg_temp.fx('ZZF-12', 'in_progress', null, '{"awaiting_external":"Agency"}');
       st := 'read';
       select array_agg(format('%s/%s/%s/%s/%s/%s', v.ticket_code, v.wait_state, v.clock_source, v.severity,
                               coalesce(v.data_quality_issue, '-'), (v.external_party is null)::text) order by v.ticket_code)
-        into t from public.v_external_wait_status v where v.ticket_code in ('ZZF-7', 'ZZF-8', 'ZZF-9', 'ZZF-10');
+        into t from public.v_external_wait_status v where v.ticket_code in ('ZZF-7', 'ZZF-8', 'ZZF-9', 'ZZF-10', 'ZZF-11', 'ZZF-12');
       select count(*) into n from public.v_external_wait_status v join public.work_items w on w.ticket_code = v.ticket_code
        where v.ticket_code like 'ZZF-%' and v.wait_state is distinct from public.work_item_wait_state(w.meta, w.due_date);
       r := r || jsonb_build_object('TC-SB603-2', case
              when t = array['ZZF-10/waiting_on_track/meta/info/-/false',
+                            'ZZF-11/waiting_no_clock//data_quality/invalid_clock/false',
+                            'ZZF-12/waiting_no_clock//data_quality/no_clock/false',
                             'ZZF-7/waiting_on_track/due_date_fallback/data_quality/invalid_clock/false',
                             'ZZF-8/waiting_on_track/meta/data_quality/non_text_party/true',
                             'ZZF-9/external_clock_expired/due_date_fallback/escalate/invalid_clock/false']
@@ -130,7 +137,8 @@ begin
   -- ------------------------------------------------ TC-SB602-2: view posture and coverage
   begin
     n := 0;
-    if exists (select 1 from pg_class where oid = 'public.v_open_work_wait_state'::regclass and reloptions @> array['security_invoker=true']) then n := n + 1; end if;
+    if exists (select 1 from pg_class where oid = 'public.v_open_work_wait_state'::regclass and reloptions @> array['security_invoker=true']
+                 and relacl::text = '{postgres=arwdDxtm/postgres,service_role=r/postgres}') then n := n + 1; end if;
     if not has_table_privilege('anon', 'public.v_open_work_wait_state', 'select') then n := n + 1; end if;
     if not has_table_privilege('authenticated', 'public.v_open_work_wait_state', 'select') then n := n + 1; end if;
     if has_table_privilege('service_role', 'public.v_open_work_wait_state', 'select') then n := n + 1; end if;
@@ -153,6 +161,11 @@ begin
          and not has_function_privilege('authenticated', p.oid, 'execute')
          and has_function_privilege('service_role', p.oid, 'execute');
       if m = 2 then n := n + 1; end if;
+      -- body fingerprints (whitespace stripped) as of SB-604: any later body change must update them
+      select count(*) into m from pg_proc p
+       where (p.oid = 'public.review_sla_sweep()'::regprocedure and md5(regexp_replace(p.prosrc, '\s+', '', 'g')) = 'a41216054b7f56867fca42108f51e2f4')
+          or (p.oid = 'public.get_review_alerts(numeric,text)'::regprocedure and md5(regexp_replace(p.prosrc, '\s+', '', 'g')) = 'ea0c8a3bbdf631fd934b26ebfb88ff5a');
+      if m = 2 then n := n + 1; end if;
       -- relations with the same names in pg_temp, each holding a sentinel row
       st := 'shadow';
       execute 'create temp table v_review_sla_breaches (ticket_code text, assignee text, hours_in_review numeric, breach_level text)';
@@ -170,7 +183,7 @@ begin
       perform set_config('search_path', 'public', true);
       select count(*) into m from public.get_review_alerts(0);
       if m = (select count(*) from public.v_review_dwell_alerts) then n := n + 1; end if;
-      r := r || jsonb_build_object('TC-SB604-1', case when n = 4 then 'pass' else format('FAIL: %s of 4 checks', n) end);
+      r := r || jsonb_build_object('TC-SB604-1', case when n = 5 then 'pass' else format('FAIL: %s of 5 checks', n) end);
       raise exception '%', rb;
     exception when others then
       perform set_config('search_path', 'public', true);

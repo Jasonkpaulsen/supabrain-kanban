@@ -111,7 +111,7 @@ test("groupExternalWaits splits by state, sorts by clock and drops wait_state fr
   assert.deepEqual(g.on_track.map((r) => r.ticket_code), ["X-2", "39P-026"]);
   assert.deepEqual(g.expired.map((r) => r.ticket_code), ["X-4", "X-3"], "most overdue first");
   assert.deepEqual(g.no_clock.map((r) => r.ticket_code), ["X-5"]);
-  assert.deepEqual(g.counts, { on_track: 2, expired: 2, no_clock: 1, total: 6, unknown_state: 1, data_quality: 2 });
+  assert.deepEqual(g.counts, { on_track: 2, expired: 2, no_clock: 1, total: 6, unknown_state: 1, data_quality: 1 });
   assert.ok(!("wait_state" in g.on_track[0]));
   assert.equal(g.no_clock[0].data_quality_issue, "no_clock");
 });
@@ -131,7 +131,7 @@ test("SB-603: a data-quality issue keeps the row in its list and is counted", ()
     [["Q-1", "data_quality", "invalid_clock"], ["Q-3", "info", null]]);
   assert.deepEqual(g.expired.map((r) => [r.ticket_code, r.severity]), [["Q-2", "escalate"]],
     "a lapsed clock outranks a data-quality issue");
-  assert.equal(g.counts.data_quality, 1);
+  assert.equal(g.counts.data_quality, 2, "an expired row with an issue is still counted");
 });
 
 function parked(code: string, assignee: string | null, priority: string, at: string, slot: boolean): WipQueueRow {

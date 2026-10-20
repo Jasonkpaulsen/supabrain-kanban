@@ -139,9 +139,11 @@ and keep `wait_state is null`; `wait_state` is the database classifier
 SB-602, ADR-FLOW-005 D3a). An expired wait is skipped there too; it comes back
 once through `external_waits.expired`, which is the signal to follow up. A wait
 whose tag is malformed (an invalid `external_clock_expires`, an object or array
-in `awaiting_external`, or no clock at all) stays in its list with
-`severity = 'data_quality'` and a `data_quality_issue` (SB-603, D2a); an invalid
-clock that fell back to `due_date` reports `clock_source = 'due_date_fallback'`. Until `v_wip_queue` and `jason_decision_digest()` exist, those two
+in `awaiting_external`, or no clock at all) stays in its list with a
+`data_quality_issue` and `severity = 'data_quality'`, unless its clock has lapsed,
+when it stays `escalate` (SB-603, D2a). `counts.data_quality` counts every row
+with an issue. An invalid clock that fell back to `due_date` reports
+`clock_source = 'due_date_fallback'`. Until `v_wip_queue` and `jason_decision_digest()` exist, those two
 operations land in `failed` with a 207 and the rest of the bundle still runs.
 
 ## Tests

@@ -318,7 +318,7 @@ const OPERATIONS: Record<string, Op> = {
     mutates: false,
     summary: "SB-593: open items waiting on an outside party (v_external_wait_status), as on_track / expired / no_clock. " +
       "Expired = their window lapsed, follow up; no_clock = data-quality gap. Each row carries severity and " +
-      "data_quality_issue (SB-603); counts.data_quality totals them.",
+      "data_quality_issue (SB-603); counts.data_quality counts the rows with an issue, expired ones included.",
     run: async ({ sb }) => {
       const r = listed(await sb.from("v_external_wait_status")
         .select([...EXTERNAL_WAIT_FIELDS, "wait_state"].join(","), { count: "exact" })

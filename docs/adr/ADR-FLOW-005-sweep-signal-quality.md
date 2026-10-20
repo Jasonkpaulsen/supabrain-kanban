@@ -78,7 +78,8 @@ cover. None changes which items count as waiting; three change how the result is
 | D3a | SB-601, SB-602 | **The edge reads the database classification; it no longer re-derives it.** `v_open_work_wait_state` (security invoker; SELECT for `service_role` only) lists open, unarchived work items with the columns the edge returns plus `wait_state = work_item_wait_state(meta, due_date)`. In `supabrain-sweep`, `stale_wip`, `blocked_items` and now `review_queue_aging` read it and keep `wait_state is null`. `NOT_WAITING_FILTER` and `edgeTreatsAsWaiting` are removed, so whitespace and case are judged by the same classifier as every other sweep. `review_queue_aging` closes the D3 gap on the edge path (SB-601). `external_waits` also returns `severity` and `data_quality_issue` and counts `data_quality`. |
 | D12 | SB-604 | **SECURITY DEFINER functions on the review path pin `search_path = ''`.** `review_sla_sweep()` and `get_review_alerts(numeric, text)` are re-sent with every relation schema-qualified and no other change. Grants are unchanged (postgres, service_role). The `work_item_wait_state(meta, due_date) IS NULL` anchor that TC-SB593-7 pins is kept verbatim. |
 
-Objects: migration `sb601_604_wait_state_reads_and_review_search_path`; suites
+Objects: migrations `sb601_604_wait_state_reads_and_review_search_path` and
+`sb601_604_verifier_minors` (SELECT-only grant on the new view, object comments); suites
 `supabase/tests/external_wait_state_suite.sql` (TC-SB593-7 now pins 17 columns on
 `v_external_wait_status`) and `supabase/tests/wait_state_followups_suite.sql`;
 `supabase/functions/supabrain-sweep/{index.ts,ops.ts,ops.test.ts,README.md}`;

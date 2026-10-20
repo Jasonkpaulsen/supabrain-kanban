@@ -41,7 +41,7 @@ export type ExternalWaits = {
   no_clock: Array<Omit<ExternalWaitRow, "wait_state">>;
   counts: {
     on_track: number; expired: number; no_clock: number; total: number; unknown_state: number;
-    /** SB-603: rows the view marks severity 'data_quality', in any list. */
+    /** SB-603: rows with a data_quality_issue, in any list (an expired one stays severity 'escalate'). */
     data_quality: number;
   };
 };
@@ -66,7 +66,7 @@ export function groupExternalWaits(rows: ExternalWaitRow[]): ExternalWaits {
     counts: { on_track: 0, expired: 0, no_clock: 0, total: rows.length, unknown_state: 0, data_quality: 0 },
   };
   for (const { wait_state, ...rest } of rows) {
-    if (rest.severity === "data_quality") out.counts.data_quality++;
+    if (rest.data_quality_issue !== null && rest.data_quality_issue !== undefined) out.counts.data_quality++;
     if (wait_state === "waiting_on_track") out.on_track.push(rest);
     else if (wait_state === "external_clock_expired") out.expired.push(rest);
     else if (wait_state === "waiting_no_clock") out.no_clock.push(rest);
