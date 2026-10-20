@@ -137,6 +137,7 @@ begin
   end;
 
   -- ------------------------------------------------ TC-SB593-7 (catalog half): posture and column shape
+  -- v_external_wait_status has 17 columns since SB-603 appended data_quality_issue (ADR-FLOW-005 D2a).
   begin
     select count(*) into n from pg_class c
      where c.oid = 'public.v_external_wait_status'::regclass and c.reloptions @> array['security_invoker=true']
@@ -156,7 +157,7 @@ begin
        group by c.relname) x;
     r := r || jsonb_build_object('TC-SB593-7', case
            when n = 1 and m = 2 and k = 1
-            and msg = 'jarvis_ops_metrics=20,v_external_wait_status=16,v_review_dwell_alerts=10,v_review_sla_breaches=9,vw_audit_health_checks=7' then 'pass'
+            and msg = 'jarvis_ops_metrics=20,v_external_wait_status=17,v_review_dwell_alerts=10,v_review_sla_breaches=9,vw_audit_health_checks=7' then 'pass'
            else format('FAIL: view %s, functions %s, sweep %s, columns %s', n, m, k, msg) end);
   exception when others then
     r := r || jsonb_build_object('TC-SB593-7', 'FAIL: error ' || sqlstate);

@@ -128,14 +128,20 @@ database and every sweep shares it:
 
 | Operation | Reads | Returns |
 |---|---|---|
-| `external_waits` | `v_external_wait_status` (SB-593) | `on_track`, `expired`, `no_clock` lists (ticket_code, status, assignee, priority, external_party, external_ref, clock_expires, clock_source, days_to_clock, project_id) and `counts` |
+| `external_waits` | `v_external_wait_status` (SB-593, SB-603) | `on_track`, `expired`, `no_clock` lists (ticket_code, status, assignee, priority, external_party, external_ref, clock_expires, clock_source, days_to_clock, project_id, severity, data_quality_issue) and `counts`, including `data_quality` |
 | `wip_queue` | `v_wip_queue` (SB-598) | parked tickets grouped `by_assignee` (critical, high, medium, low, then oldest `blocked_at`), `ready` = rows whose assignee has a free slot, and `counts` |
 | `decision_digest` | `jason_decision_digest()` (SB-554) | passed through: `total`, `by_priority`, `breached`, `oldest_days`, `noop_escalations`, `items` |
 
-`stale_wip` and `blocked_items` now skip any item waiting on an outside party
-(`.or(NOT_WAITING_FILTER)` in `ops.ts`). An expired wait is skipped there too;
-it comes back once through `external_waits.expired`, which is the signal to
-follow up. Until `v_wip_queue` and `jason_decision_digest()` exist, those two
+`stale_wip`, `blocked_items` and `review_queue_aging` skip any item waiting on an
+outside party. They read `v_open_work_wait_state` (`OPEN_WORK_VIEW` in `ops.ts`)
+and keep `wait_state is null`; `wait_state` is the database classifier
+`work_item_wait_state`, so the edge no longer re-derives the rule (SB-601,
+SB-602, ADR-FLOW-005 D3a). An expired wait is skipped there too; it comes back
+once through `external_waits.expired`, which is the signal to follow up. A wait
+whose tag is malformed (an invalid `external_clock_expires`, an object or array
+in `awaiting_external`, or no clock at all) stays in its list with
+`severity = 'data_quality'` and a `data_quality_issue` (SB-603, D2a); an invalid
+clock that fell back to `due_date` reports `clock_source = 'due_date_fallback'`. Until `v_wip_queue` and `jason_decision_digest()` exist, those two
 operations land in `failed` with a 207 and the rest of the bundle still runs.
 
 ## Tests
@@ -143,9 +149,10 @@ operations land in `failed` with a 207 and the rest of the bundle still runs.
 `params.test.ts` tests the parameter resolver and the truncation check in
 `params.ts`, the module that ships. It includes the architect's reproduction as
 its first case. `ops.test.ts` (SB-593) tests the grouping helpers and the wait
-filter in `ops.ts`, and checks from `index.ts`'s source that `stale_wip` and
-`blocked_items` apply the filter, that the three new operations are read-only,
-and the bundle lists. CI runs them through `.github/workflows/function-tests.yml`.
+view name in `ops.ts`, and checks from `index.ts`'s source that `stale_wip`,
+`blocked_items` and `review_queue_aging` read the wait-state view, that no
+operation re-derives the rule from `meta`, that the three new operations are
+read-only, and the bundle lists. CI runs them through `.github/workflows/function-tests.yml`.
 Locally:
 
 ```sh
@@ -179,10 +186,10 @@ operations here are derived from the database. SB-483/484/485 rewrite those
 SKILL.md files against this endpoint and will establish whether any operation is
 missing; adding one is an edit to the allow-list plus a redeploy.
 
-The edge's wait filter treats only a missing key, `''` and `'false'` as "not
-waiting". The database classifier `work_item_wait_state` also trims whitespace
-and lower-cases `'false'`, so a value such as `'  '` or `'FALSE'` is skipped by
-`stale_wip` but is not listed by `external_waits` either. Such an item is a
-malformed tag: fix the value rather than the filter. A real wait is never hidden.
+Up to v5 the edge filtered `meta->>awaiting_external` itself and treated only a
+missing key, `''` and `'false'` as "not waiting", while `work_item_wait_state`
+also trims and lower-cases. A value such as `'  '` or `'FALSE'` therefore dropped
+out of every edge list (SB-602). Since v6 the edge reads the classifier's answer,
+so the two cannot disagree.
 Rule text for the Mac-resident JARVIS briefing is in
 `docs/skills/jarvis-briefing-external-wait.md`.

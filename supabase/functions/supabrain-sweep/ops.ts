@@ -1,32 +1,22 @@
-// SB-593 / ADR-FLOW-005 D3, D10, D11: pure helpers behind the read-only
-// operations external_waits, wip_queue and the wait filter on stale_wip /
-// blocked_items. No Deno or Supabase imports, so ops.test.ts imports the code
+// SB-593 / ADR-FLOW-005 D3, D3a, D10, D11: pure helpers behind the read-only
+// operations external_waits and wip_queue, and the view the wait-aware list
+// operations read. No Deno or Supabase imports, so ops.test.ts imports the code
 // that ships, as params.test.ts does for params.ts.
 
 /**
- * PostgREST `.or()` filter that keeps only items NOT waiting on an outside
- * party. The edge treats only a missing key, '' and 'false' as "not waiting".
- * The database classifier (work_item_wait_state) also trims whitespace and
- * lower-cases 'false', so a value of '  ' or 'FALSE' is skipped here but not
- * counted as waiting there; such an item is invisible to both stale_wip and
- * external_waits until the value is cleaned. It never hides a real wait.
- * Expired waits are skipped here too: they come back through external_waits,
- * once, with severity 'escalate'.
+ * SB-602 / ADR-FLOW-005 D3a: the view stale_wip, blocked_items and review_queue_aging
+ * read instead of work_items. Its wait_state column is the database classifier
+ * (work_item_wait_state), so the edge no longer re-derives "waiting" from
+ * meta.awaiting_external and cannot disagree with it on whitespace or case. These
+ * operations keep `wait_state is null`: an expired wait is skipped here too and comes
+ * back once through external_waits, with severity 'escalate'.
  */
-export const NOT_WAITING_FILTER =
-  "meta->>awaiting_external.is.null,meta->>awaiting_external.eq.false,meta->>awaiting_external.eq.";
-
-/** The edge's own reading of the key, mirroring NOT_WAITING_FILTER exactly. */
-export function edgeTreatsAsWaiting(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  const s = String(value);
-  return s !== "" && s !== "false";
-}
+export const OPEN_WORK_VIEW = "v_open_work_wait_state";
 
 /** Columns external_waits returns from v_external_wait_status. */
 export const EXTERNAL_WAIT_FIELDS = [
   "ticket_code", "status", "assignee", "priority", "external_party", "external_ref",
-  "clock_expires", "clock_source", "days_to_clock", "project_id",
+  "clock_expires", "clock_source", "days_to_clock", "project_id", "severity", "data_quality_issue",
 ] as const;
 
 export type ExternalWaitRow = {
@@ -40,6 +30,8 @@ export type ExternalWaitRow = {
   clock_source: string | null;
   days_to_clock: number | null;
   project_id: string | null;
+  severity: string | null;
+  data_quality_issue: string | null;
   wait_state: string;
 };
 
@@ -47,7 +39,11 @@ export type ExternalWaits = {
   on_track: Array<Omit<ExternalWaitRow, "wait_state">>;
   expired: Array<Omit<ExternalWaitRow, "wait_state">>;
   no_clock: Array<Omit<ExternalWaitRow, "wait_state">>;
-  counts: { on_track: number; expired: number; no_clock: number; total: number; unknown_state: number };
+  counts: {
+    on_track: number; expired: number; no_clock: number; total: number; unknown_state: number;
+    /** SB-603: rows the view marks severity 'data_quality', in any list. */
+    data_quality: number;
+  };
 };
 
 function byClock(a: { days_to_clock: number | null; ticket_code: string },
@@ -60,14 +56,17 @@ function byClock(a: { days_to_clock: number | null; ticket_code: string },
 /**
  * Split v_external_wait_status rows by wait_state. Expired items are sorted
  * most overdue first; on-track by nearest clock. A state the view does not
- * define is counted in unknown_state rather than silently dropped.
+ * define is counted in unknown_state rather than silently dropped. A row with a
+ * data-quality issue (SB-603: invalid clock, non-text party, no clock) stays in its
+ * list and is also counted in counts.data_quality.
  */
 export function groupExternalWaits(rows: ExternalWaitRow[]): ExternalWaits {
   const out: ExternalWaits = {
     on_track: [], expired: [], no_clock: [],
-    counts: { on_track: 0, expired: 0, no_clock: 0, total: rows.length, unknown_state: 0 },
+    counts: { on_track: 0, expired: 0, no_clock: 0, total: rows.length, unknown_state: 0, data_quality: 0 },
   };
   for (const { wait_state, ...rest } of rows) {
+    if (rest.severity === "data_quality") out.counts.data_quality++;
     if (wait_state === "waiting_on_track") out.on_track.push(rest);
     else if (wait_state === "external_clock_expired") out.expired.push(rest);
     else if (wait_state === "waiting_no_clock") out.no_clock.push(rest);

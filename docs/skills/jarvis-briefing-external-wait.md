@@ -21,7 +21,8 @@ reported as stale or overdue while that window is open.
 
    ```sql
    select ticket_code, status, assignee, priority, external_party, external_ref,
-          external_since, clock_expires, clock_source, days_to_clock, wait_state, severity
+          external_since, clock_expires, clock_source, days_to_clock, wait_state, severity,
+          data_quality_issue
      from public.v_external_wait_status
     order by days_to_clock nulls last;
    ```
@@ -52,6 +53,15 @@ reported as stale or overdue while that window is open.
    waiting but has no valid `external_clock_expires` and no `due_date`. Add a one-line
    data-quality note (`<ticket_code>: waiting on <party>, no follow-up date set`). It is not a
    push and not stale. Ask the owner for a clock.
+
+   **Any other row with `data_quality_issue` set** stays where its `wait_state` puts it
+   (steps 2 and 3) and also gets a one-line data-quality note:
+   - `invalid_clock`: `external_clock_expires` is not a valid `YYYY-MM-DD`; the clock shown
+     is the `due_date` fallback (`clock_source = 'due_date_fallback'`). Note: `<ticket_code>:
+     follow-up date unreadable, using due date <clock_expires>`.
+   - `non_text_party`: `awaiting_external` holds an object or list, so the party is unknown
+     (`external_party` is NULL). Note: `<ticket_code>: waiting tag malformed, party unknown`.
+   A lapsed clock still wins: an `escalate` row is push-worthy even with an issue.
 
 5. **`due_date` means our next action.** While an item waits, `due_date` is the follow-up date.
    Never describe it as the outside party's deadline, and never call an item "due today and

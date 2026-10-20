@@ -41,11 +41,13 @@
 // refused rather than applied to both. Every list result carries `truncated`
 // and `total`, and the response names any result that was cut short.
 //
-// External waits (SB-593, ADR-FLOW-005 D3): stale_wip and blocked_items skip
-// any item whose meta.awaiting_external names an outside party (see
-// NOT_WAITING_FILTER in ops.ts); external_waits lists those items from
-// v_external_wait_status, split into on-track, expired and no-clock. Expired
-// waits surface there, once, rather than as stale work. wip_queue (SB-598)
+// External waits (SB-593, ADR-FLOW-005 D3 / D3a): stale_wip, blocked_items and
+// review_queue_aging read v_open_work_wait_state and skip any item the database
+// classifier says is waiting on an outside party (OPEN_WORK_VIEW in ops.ts); the
+// edge does not re-derive the rule. external_waits lists those items from
+// v_external_wait_status, split into on-track, expired and no-clock, with severity
+// and any data-quality issue. Expired waits surface there, once, rather than as
+// stale work. wip_queue (SB-598)
 // and decision_digest (SB-554) are read-only views of objects the database
 // owns.
 
@@ -53,7 +55,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { PARAM_SPECS, resolveParams, truncated } from "./params.ts";
 import {
-  EXTERNAL_WAIT_FIELDS, type ExternalWaitRow, groupExternalWaits, groupWipQueue, NOT_WAITING_FILTER,
+  EXTERNAL_WAIT_FIELDS, type ExternalWaitRow, groupExternalWaits, groupWipQueue, OPEN_WORK_VIEW,
   WIP_QUEUE_FIELDS, type WipQueueRow,
 } from "./ops.ts";
 
@@ -248,13 +250,13 @@ const OPERATIONS: Record<string, Op> = {
   },
   review_queue_aging: {
     mutates: false,
-    summary: "Items in review longer than ageHours.",
+    summary: "Items in review longer than ageHours, skipping items waiting on an outside party (see external_waits).",
     run: async ({ sb, p }) => {
       const hours = p.ageHours;
-      const r = listed(await sb.from("work_items")
+      const r = listed(await sb.from(OPEN_WORK_VIEW)
         .select("ticket_code,title,assignee,priority,review_entered_at,project_id", { count: "exact" })
-        .eq("archived", false)
         .eq("status", "review")
+        .is("wait_state", null)
         .lt("review_entered_at", isoHoursAgo(hours))
         .order("review_entered_at", { ascending: true })
         .limit(MAX_ROWS), MAX_ROWS);
@@ -266,11 +268,10 @@ const OPERATIONS: Record<string, Op> = {
     summary: "in_progress items untouched for staleDays, skipping items waiting on an outside party (see external_waits).",
     run: async ({ sb, p }) => {
       const days = p.staleDays;
-      const r = listed(await sb.from("work_items")
+      const r = listed(await sb.from(OPEN_WORK_VIEW)
         .select("ticket_code,title,assignee,priority,updated_at,project_id", { count: "exact" })
-        .eq("archived", false)
         .eq("status", "in_progress")
-        .or(NOT_WAITING_FILTER)
+        .is("wait_state", null)
         .lt("updated_at", isoDaysAgo(days))
         .order("updated_at", { ascending: true })
         .limit(MAX_ROWS), MAX_ROWS);
@@ -282,11 +283,10 @@ const OPERATIONS: Record<string, Op> = {
     summary: "blocked / on_hold items untouched for staleDays, skipping items waiting on an outside party (see external_waits).",
     run: async ({ sb, p }) => {
       const days = p.staleDays;
-      const r = listed(await sb.from("work_items")
+      const r = listed(await sb.from(OPEN_WORK_VIEW)
         .select("ticket_code,title,status,assignee,priority,updated_at,project_id", { count: "exact" })
-        .eq("archived", false)
         .in("status", ["blocked", "on_hold"])
-        .or(NOT_WAITING_FILTER)
+        .is("wait_state", null)
         .lt("updated_at", isoDaysAgo(days))
         .order("updated_at", { ascending: true })
         .limit(MAX_ROWS), MAX_ROWS);
@@ -317,7 +317,8 @@ const OPERATIONS: Record<string, Op> = {
   external_waits: {
     mutates: false,
     summary: "SB-593: open items waiting on an outside party (v_external_wait_status), as on_track / expired / no_clock. " +
-      "Expired = their window lapsed, follow up; no_clock = data-quality gap.",
+      "Expired = their window lapsed, follow up; no_clock = data-quality gap. Each row carries severity and " +
+      "data_quality_issue (SB-603); counts.data_quality totals them.",
     run: async ({ sb }) => {
       const r = listed(await sb.from("v_external_wait_status")
         .select([...EXTERNAL_WAIT_FIELDS, "wait_state"].join(","), { count: "exact" })
