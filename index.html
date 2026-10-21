@@ -530,7 +530,8 @@ async function hdr(){var s=await sb.auth.getSession();var t=s.data.session&&s.da
 function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function toast(m,t){var e=document.createElement('div');e.className='toast '+(t||'success');e.textContent=m;document.body.appendChild(e);setTimeout(function(){e.remove();},2500);}
 function iDom(it){return it.project_domain||projDom[it.project_id]||null;}
-function projDevAuto(p){return !!(p&&p.meta&&p.meta.dev_automation==='on');}
+/* SB-623: the runner gates on projects.automation_status (SB-390); meta.dev_automation is retired. */
+function projDevAuto(p){return !!(p&&p.automation_status==='active');}
 
 /* Auth */
 document.getElementById('login-form').addEventListener('submit',async function(e){
@@ -559,7 +560,7 @@ async function loadAll(){
   try{
     var h=await hdr();
     var [pR,lR,iR,aR,bR,jR]=await Promise.all([
-      fetch(SB_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
+      fetch(SB_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,automation_status,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/kanban_board_view?select=*'+(showArchived?'':'&archived=eq.false')+'&order=sort_order',{headers:h}),
       fetch(SB_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
@@ -1032,6 +1033,7 @@ document.getElementById('pa-tgl').addEventListener('click',async function(){
   if(offlineGuard())return;
   if(curProj==='all')return;
   var b=this,wasOn=b.dataset.on==='1',next=!wasOn;
+  if(next&&!confirm('Turn on automation for this project? Agents will start picking up its tickets on the next run.'))return;
   b.disabled=true;
   try{
     var h=await hdr();
@@ -1039,8 +1041,8 @@ document.getElementById('pa-tgl').addEventListener('click',async function(){
     var body=r.ok?await r.json():null;
     if(!r.ok||!body||body.ok!==true)throw new Error((body&&body.error)||('HTTP '+r.status));
     var p=projects.find(function(x){return x.id===curProj;});
-    if(p){p.meta=p.meta||{};p.meta.dev_automation=body.dev_automation;}
-    toast(body.project+': dev automation '+body.dev_automation);
+    if(p)p.automation_status=body.automation_status;
+    toast(body.project+': automation '+body.automation_status);
   }catch(e){toast('Automation update failed','error');}
   b.disabled=false;
   renderProjAuto();
