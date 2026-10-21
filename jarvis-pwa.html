@@ -637,13 +637,14 @@ function renderJFiltered(){
 }
 
 function renderJStats(){
+  if((summaryF==='done24'||summaryF==='changed24')&&getJDom()!==summaryDom){setSummaryF('all');renderBoardContent();}
   var ad=getJDom(),scope=items.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;});
   var total=scope.length,d24=0,c24=0,flagged=0,now=Date.now(),h24=864e5;
   scope.forEach(function(it){if(it.status==='done'&&it.completed_at&&(now-new Date(it.completed_at).getTime())<h24)d24++;if(it.updated_at&&(now-new Date(it.updated_at).getTime())<h24)c24++;});
   if(briefing&&briefing.flags)flagged=briefing.flags.length;
   document.getElementById('j-stats').innerHTML=donut(d24,total||1,'var(--green)','Done','done24')+donut(c24,total||1,'#f0883e','Changed','changed24')+donut(0,10,'#79c0ff','Decided')+donut(flagged,10,'var(--red)','Flagged');
 }
-function donut(v,mx,c,lb,fk){var p=mx?Math.min(v/mx,1):0,r=26,ci=2*Math.PI*r,off=ci*(1-p);return'<div class="j-stat'+(fk&&summaryF===fk?' sf-active':'')+'"'+(fk?' data-sf="'+fk+'" role="button" tabindex="0" title="Show these on the board"':'')+'><div class="j-donut"><svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="'+r+'"/><circle class="fl" cx="32" cy="32" r="'+r+'" stroke="'+c+'" stroke-dasharray="'+ci+'" stroke-dashoffset="'+off+'"/></svg></div><div class="j-stat-n" style="color:'+c+'">'+v+'</div><div class="j-stat-l">'+lb+'</div></div>';}
+function donut(v,mx,c,lb,fk){var p=mx?Math.min(v/mx,1):0,r=26,ci=2*Math.PI*r,off=ci*(1-p);return'<div class="j-stat'+(fk&&summaryF===fk?' sf-active':'')+'"'+(fk?' data-sf="'+fk+'" role="button" tabindex="0" aria-pressed="'+(summaryF===fk)+'" title="Show these on the board"':'')+'><div class="j-donut"><svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="'+r+'"/><circle class="fl" cx="32" cy="32" r="'+r+'" stroke="'+c+'" stroke-dasharray="'+ci+'" stroke-dashoffset="'+off+'"/></svg></div><div class="j-stat-n" style="color:'+c+'">'+v+'</div><div class="j-stat-l">'+lb+'</div></div>';}
 /* SB-209 / SB-616: a summary card filters the board to exactly the items it counts.
    Jarvis Done / Changed use the Jarvis 24h rule and the Jarvis domain chip; the board cards
    use the board's own counts (cancelled excluded). Decided and Flagged are display-only:
@@ -665,7 +666,7 @@ function summaryMatch(it){
 }
 function setSummaryF(f,dom){
   summaryF=(f==='all'||summaryF===f)?'all':f;summaryDom=summaryF==='all'?'all':(dom||'all');
-  document.querySelectorAll('.b-stats-grid .b-stat[data-sf]').forEach(function(c){c.classList.toggle('sf-active',summaryF!=='all'&&c.dataset.sf===summaryF);});
+  document.querySelectorAll('.b-stats-grid .b-stat[data-sf]').forEach(function(c){var on=summaryF!=='all'&&c.dataset.sf===summaryF;c.classList.toggle('sf-active',on);if(c.dataset.sf!=='all')c.setAttribute('aria-pressed',String(on));});
   var chip=document.getElementById('sf-chip');
   if(chip){chip.textContent=summaryF==='all'?'':'Showing: '+SF_LABEL[summaryF]+(summaryDom!=='all'?' \u00b7 '+summaryDom:'')+'  \u2715';chip.classList.toggle('show',summaryF!=='all');}
 }
@@ -1011,15 +1012,19 @@ document.getElementById('fd-label').addEventListener('change',function(){labelF=
 function sfKey(e){if((e.key==='Enter'||e.key===' ')&&e.target.closest('[data-sf],#sf-chip')){e.preventDefault();e.target.click();}}
 document.getElementById('j-stats').addEventListener('click',function(e){
   var card=e.target.closest('.j-stat[data-sf]');if(!card)return;
-  setSummaryF(card.dataset.sf,getJDom());renderJStats();
+  var key=card.dataset.sf,ap=document.querySelector('#proj-pills .proj-pill[data-id="all"]');
+  if(ap&&!ap.classList.contains('active'))ap.click();   /* the Jarvis donuts count every project */
+  setSummaryF(key,getJDom());renderJStats();
   if(summaryF!=='all')document.querySelector('.nav-btn[data-tab="board"]').click();
   renderBoardContent();
+  var back=summaryF==='all'?document.querySelector('#j-stats [data-sf="'+key+'"]'):document.getElementById('sf-chip');
+  if(back)back.focus();
 });
 document.querySelector('.b-stats-grid').addEventListener('click',function(e){
   var card=e.target.closest('.b-stat[data-sf]');if(!card)return;
   setSummaryF(card.dataset.sf);renderJStats();renderBoardContent();
 });
-document.getElementById('sf-chip').addEventListener('click',function(){setSummaryF('all');renderJStats();renderBoardContent();});
+document.getElementById('sf-chip').addEventListener('click',function(){setSummaryF('all');renderJStats();renderBoardContent();var t=document.querySelector('.b-stats-grid .b-stat[data-sf="all"]');if(t)t.focus();});
 ['j-stats','sf-chip'].forEach(function(id){document.getElementById(id).addEventListener('keydown',sfKey);});
 document.querySelector('.b-stats-grid').addEventListener('keydown',sfKey);
 document.getElementById('fd-clear').addEventListener('click',function(){setSummaryF('all');renderJStats();statusF='all';domF='all';priF='all';agentF='all';labelF='all';search='';
