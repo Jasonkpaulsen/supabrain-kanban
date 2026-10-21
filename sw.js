@@ -8,7 +8,8 @@
 // is served cache-first, so without a new cache name a returning visitor would
 // keep the old page and never fetch the file that now holds the key.
 // SB-565: bumped v11 -> v12 because cancel-ui.js joined the app shell.
-const CACHE_NAME = 'jarvis-pwa-v12';
+// SB-616: bumped v12 -> v13 so returning visitors get the restored summary-card filters.
+const CACHE_NAME = 'jarvis-pwa-v13';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache

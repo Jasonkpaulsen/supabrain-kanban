@@ -131,7 +131,8 @@ async function loginPwa(page, opts = {}) {
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
 
   await installStubs(page, opts.payload);
-  await page.goto('/jarvis-pwa.html');
+  // opts.doc: index.html shares the PWA's markup and code (SB-616 runs both).
+  await page.goto(opts.doc || '/jarvis-pwa.html');
   await page.fill('#l-email', EMAIL);
   await page.fill('#l-pass', PASSWORD);
   await page.click('#l-btn');
