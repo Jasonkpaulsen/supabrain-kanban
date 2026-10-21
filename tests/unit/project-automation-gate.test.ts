@@ -29,11 +29,13 @@ test("agent-runner gates on automation_status = 'active'", () => {
 
 test("the newest set_project_dev_automation writes automation_status, not meta", () => {
   const defs = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()
-    .filter((f) => /function\s+public\.set_project_dev_automation\s*\(/i.test(readFileSync(join(MIGRATIONS, f), "utf8")));
-  assert.ok(defs.length, "no migration defines set_project_dev_automation");
+    .filter((f) => /function\s+(public\.)?set_project_dev_automation\s*\(/i.test(readFileSync(join(MIGRATIONS, f), "utf8")));
+  // Both the 2026-06 original (unqualified) and the SB-623 rewrite must be found, so a
+  // later unqualified redefinition cannot slip past as "not the newest".
+  assert.ok(defs.length >= 2, `expected the original and the SB-623 definition, found ${defs.join(", ")}`);
   const newest = defs[defs.length - 1];
   const sql = readFileSync(join(MIGRATIONS, newest), "utf8");
-  const body = sql.slice(sql.search(/function\s+public\.set_project_dev_automation/i));
+  const body = sql.slice(sql.search(/function\s+(public\.)?set_project_dev_automation/i));
   assert.match(body, /SET\s+automation_status\s*=/i, `${newest} must write automation_status`);
   assert.doesNotMatch(body, /\bmeta\s*=/i, `${newest} must not write meta`);
   assert.doesNotMatch(body.split(/\$function\$/)[0], /security\s+definer/i, `${newest} must stay SECURITY INVOKER`);

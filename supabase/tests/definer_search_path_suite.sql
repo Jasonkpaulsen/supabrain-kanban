@@ -5,10 +5,13 @@
 -- "DEFINER_SEARCH_PATH PASS". The message carries only counts and names, never row values.
 --
 -- TC-SB622-01: escalate_overdue_reviews runs as its owner, so a caller who can put objects
--- ahead of public on the search_path must not be able to substitute its inputs. The suite
--- shadows vw_review_sla and work_items in pg_temp with a sentinel row, proves the shadow
--- WOULD win for an unqualified reference, then checks the function ignores it and returns
--- exactly the breached rows of public.vw_review_sla.
+-- ahead of public on the search_path must not be able to substitute its inputs. Two layers:
+-- .config pins search_path = '' (this is what stops a substitution of anything unqualified,
+-- operators and functions included), and .qualified/.sentinel check the body names its
+-- relations by schema. The sentinel shadows vw_review_sla and work_items in pg_temp, proves
+-- the shadow WOULD win for an unqualified reference, then checks the function ignores it and
+-- returns exactly the breached rows of public.vw_review_sla. The sentinel alone would pass on
+-- an unpinned but qualified body; .config and TC-SB622-02 are what catch a lost pin.
 -- TC-SB622-02: class guard. No SECURITY DEFINER function in public (extension members
 -- aside) may lack a pinned search_path.
 

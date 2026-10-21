@@ -9,6 +9,7 @@
 // keep the old page and never fetch the file that now holds the key.
 // SB-565: bumped v11 -> v12 because cancel-ui.js joined the app shell.
 // SB-616: bumped v12 -> v13 so returning visitors get the restored summary-card filters.
+// SB-623: bumped v13 -> v14 for the toggle that reads automation_status.
 const CACHE_NAME = 'jarvis-pwa-v14';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
