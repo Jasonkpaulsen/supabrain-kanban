@@ -56,7 +56,7 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { PARAM_SPECS, resolveParams, truncated } from "./params.ts";
 import {
   EXTERNAL_WAIT_FIELDS, type ExternalWaitRow, groupExternalWaits, groupWipQueue, OPEN_WORK_VIEW,
-  WIP_QUEUE_FIELDS, type WipQueueRow,
+  WIP_QUEUE_FIELDS, type WipQueueRow, deployDriftReport, type DeployDriftRow,
 } from "./ops.ts";
 
 const MAX_ROWS = 500;          // hard cap on any single read
@@ -347,6 +347,20 @@ const OPERATIONS: Record<string, Op> = {
     summary: "SB-554: public.jason_decision_digest() — each open item waiting on Jason once, with aging and folded no-op escalations.",
     run: async ({ sb }) => unwrap(await sb.rpc("jason_decision_digest")),
   },
+
+  // --- SB-617 ---------------------------------------------------------------
+  // The check itself runs in the database on pg_cron (deploy_drift_fetch at 07:20,
+  // deploy_drift_evaluate at 07:25 UTC). This only reads its latest daily row, so the
+  // process audit sees it; a missing or old row comes back stale, never clean.
+  deploy_drift_report: {
+    mutates: false,
+    summary: "SB-617: latest daily deploy-drift result (GitHub Pages vs main, recorded edge deploys vs main); stale if older than 26h.",
+    run: async ({ sb }) => {
+      const rows = unwrap(await sb.from("activity_log").select("created_at,summary,meta")
+        .eq("target_table", "deploy_drift").order("created_at", { ascending: false }).limit(1));
+      return deployDriftReport((rows[0] ?? null) as DeployDriftRow | null, new Date());
+    },
+  },
 };
 
 // PARAM_SPECS lives in params.ts so it can be tested; make sure it names only
@@ -360,6 +374,7 @@ for (const op of Object.keys(PARAM_SPECS)) {
 const BUNDLES: Record<string, string[]> = {
   "process-engineer-daily": [
     "qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report",
+    "deploy_drift_report",
   ],
   "management-agent-sweep": [
     "agents_missing_chain", "agent_load", "agents_idle_with_queue", "decision_digest",

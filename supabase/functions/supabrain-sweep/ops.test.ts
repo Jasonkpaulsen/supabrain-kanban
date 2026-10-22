@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import {
   EXTERNAL_WAIT_FIELDS, type ExternalWaitRow, groupExternalWaits, groupWipQueue,
   OPEN_WORK_VIEW, UNASSIGNED, WIP_QUEUE_FIELDS, type WipQueueRow,
+  byPriorityThenAge, DEPLOY_DRIFT_MAX_AGE_HOURS, deployDriftReport,
 } from "./ops.ts";
 
 const SRC = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
@@ -80,7 +81,8 @@ test("bundles: pm-triage-dispatch gains three operations, management-agent-sweep
   assert.deepEqual(bundle("management-agent-sweep"),
     ["agents_missing_chain", "agent_load", "agents_idle_with_queue", "decision_digest"]);
   assert.deepEqual(bundle("process-engineer-daily"),
-    ["qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report"], "unchanged");
+    ["qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report", "deploy_drift_report"],
+    "SB-617 adds the deploy-drift report");
 });
 
 test("field lists carry no ids and match the contract", () => {
@@ -155,4 +157,35 @@ test("groupWipQueue groups by assignee, ranks priority, and lists ready rows", (
   assert.deepEqual(g.by_assignee[UNASSIGNED].items.map((r) => r.ticket_code), ["C-1"]);
   assert.deepEqual(g.ready.map((r) => r.ticket_code), ["B-2", "B-1"]);
   assert.deepEqual(g.counts, { parked: 6, assignees: 3, ready: 2 });
+});
+
+// --- SB-617 ------------------------------------------------------------------
+test("deploy_drift_report is read-only, reads the deploy_drift rows and is in the daily bundle", () => {
+  const src = opSource("deploy_drift_report");
+  assert.match(src, /mutates: false,/);
+  assert.match(src, /\.from\("activity_log"\)/);
+  assert.match(src, /\.eq\("target_table", "deploy_drift"\)/);
+  assert.doesNotMatch(src, /\.(insert|update|upsert|rpc)\(/, "the report must not write or run the check");
+});
+
+test("deployDriftReport: a missing or old result is stale, never clean", () => {
+  const now = new Date("2026-10-22T08:00:00Z");
+  assert.deepEqual(deployDriftReport(null, now), { found: false, stale: true, note: "no deploy_drift result recorded yet" });
+  const row = (at: string) => ({ created_at: at, summary: "s", meta: { violations: [{ type: "edge_not_on_main" }], flags: [], checked: 31 } });
+  const fresh = deployDriftReport(row("2026-10-22T07:25:00Z"), now);
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.violations_count, 1);
+  assert.equal(fresh.checked, 31);
+  const edge = new Date(now.getTime() - DEPLOY_DRIFT_MAX_AGE_HOURS * 3_600_000).toISOString();
+  assert.equal(deployDriftReport(row(edge), now).stale, false, "exactly the limit is still fresh");
+  assert.equal(deployDriftReport(row("2026-10-21T05:00:00Z"), now).stale, true);
+  assert.equal(deployDriftReport(row("not a date"), now).stale, true, "an unreadable time is stale");
+});
+
+test("byPriorityThenAge: rows with no blocked_at sort last, and ops.ts carries no raw U+FFFF", () => {
+  const rows = [{ priority: "high", blocked_at: null }, { priority: "high", blocked_at: "2026-10-01T00:00:00Z" }] as WipQueueRow[];
+  assert.deepEqual([...rows].sort(byPriorityThenAge).map((r) => r.blocked_at), ["2026-10-01T00:00:00Z", null]);
+  const ops = readFileSync(new URL("./ops.ts", import.meta.url), "utf8");
+  assert.ok(!ops.includes(String.fromCharCode(0xffff)),
+    "no literal U+FFFF in ops.ts: build it with String.fromCharCode so deployed bytes match the repo");
 });

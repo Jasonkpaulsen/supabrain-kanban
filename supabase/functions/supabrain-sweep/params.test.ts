@@ -152,7 +152,8 @@ test("every declared parameter has a meaning and a default inside its range", ()
 
 test("the flat names the three bundles could send are unambiguous within each bundle", () => {
   const bundles: Record<string, string[]> = {
-    "process-engineer-daily": ["qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report"],
+    "process-engineer-daily": ["qa_shiftleft_sweep", "review_sla_sweep", "cron_health_check", "backlog_grooming_report",
+      "deploy_drift_report"],
     "management-agent-sweep": ["agents_missing_chain", "agent_load", "agents_idle_with_queue", "decision_digest"],
     "pm-triage-dispatch": PM_TRIAGE,
   };

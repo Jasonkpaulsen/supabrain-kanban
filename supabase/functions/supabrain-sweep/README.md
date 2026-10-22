@@ -110,7 +110,7 @@ than a 500.
 
 | Bundle | Operations |
 |---|---|
-| `process-engineer-daily` | `qa_shiftleft_sweep`, `review_sla_sweep`, `cron_health_check`, `backlog_grooming_report` |
+| `process-engineer-daily` | `qa_shiftleft_sweep`, `review_sla_sweep`, `cron_health_check`, `backlog_grooming_report`, `deploy_drift_report` |
 | `management-agent-sweep` | `agents_missing_chain`, `agent_load`, `agents_idle_with_queue`, `decision_digest` |
 | `pm-triage-dispatch` | `untriaged_items`, `review_queue_aging`, `stale_wip`, `blocked_items`, `awaiting_human`, `external_waits`, `wip_queue`, `decision_digest` |
 
@@ -119,6 +119,11 @@ functions granted to `service_role` only. This endpoint calls them; it does not
 reimplement them. All four write, so a `dryRun` of that bundle runs nothing.
 `backlog_grooming_report` was declared read-only until SB-495, but the database
 function inserts an `activity_log` row on every call, so a dry run wrote one.
+
+`deploy_drift_report` (SB-617) is read-only: it returns the latest daily result of the
+deploy-drift check, which runs in the database on pg_cron (`deploy_drift_fetch` at 07:20,
+`deploy_drift_evaluate` at 07:25 UTC). A missing result, or one older than 26 hours,
+comes back `stale: true`, so a dead check never reads as a clean one.
 
 ### External waits, the WIP queue and the decision digest (SB-593, ADR-FLOW-005)
 
@@ -163,6 +168,26 @@ node --experimental-strip-types --test supabase/functions/supabrain-sweep/*.test
 
 Deploy `index.ts`, `params.ts` and `ops.ts` together, with `verify_jwt` off. The
 test files are not deployed.
+
+## Recording a deploy (SB-617)
+
+The database cannot see which version of an edge function is live, so every deploy of
+any function in `supabase/functions/` is recorded in `public.edge_function_deploys`. The
+daily deploy-drift check compares that ledger with main; a deploy that is not recorded is
+invisible to it.
+
+1. Deploy, then note the `version` and `ezbr_sha256` that `list_edge_functions` reports.
+2. Hash each deployed source file exactly as committed: `git show <commit>:supabase/functions/<slug>/<file> | sha256sum`.
+3. Record it (as postgres or service_role):
+
+```sql
+select public.record_edge_function_deploy(
+  '<slug>', <version>, '<ezbr_sha256>',
+  '{"index.ts": "<sha256>", "ops.ts": "<sha256>"}'::jsonb,
+  '<commit>', now(), '<who deployed>', '<note, optional>');
+```
+
+Re-recording the same slug and version replaces the row.
 
 ## A defect this found in itself
 

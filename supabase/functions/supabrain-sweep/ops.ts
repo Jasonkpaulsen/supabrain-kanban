@@ -116,7 +116,43 @@ export function byPriorityThenAge(a: WipQueueRow, b: WipQueueRow): number {
   const x = PRIORITY_RANK[a.priority ?? ""] ?? 4;
   const y = PRIORITY_RANK[b.priority ?? ""] ?? 4;
   if (x !== y) return x - y;
-  return (a.blocked_at ?? "\uffff").localeCompare(b.blocked_at ?? "\uffff");
+  return (a.blocked_at ?? LAST).localeCompare(b.blocked_at ?? LAST);
+}
+
+// Sorts after any timestamp. Built from its code point rather than written as a "\uffff"
+// escape, because the deploy path turned the escape into the literal character and the
+// deployed bytes stopped matching the repo (SB-617's ledger compares them).
+const LAST = String.fromCharCode(0xffff);
+
+/** SB-617: the deploy-drift check runs daily at 07:25 UTC; a result older than this is stale. */
+export const DEPLOY_DRIFT_MAX_AGE_HOURS = 26;
+
+export interface DeployDriftRow {
+  created_at: string;
+  summary: string | null;
+  meta: { violations?: unknown[]; flags?: unknown[]; run_id?: string; checked?: number } | null;
+}
+
+/**
+ * Shape the latest deploy_drift activity_log row for the daily audit. No row, or a row
+ * older than a day and a bit, is reported as stale: silence must not read as clean.
+ */
+export function deployDriftReport(row: DeployDriftRow | null, now: Date) {
+  if (!row) return { found: false, stale: true, note: "no deploy_drift result recorded yet" };
+  const ageHours = (now.getTime() - new Date(row.created_at).getTime()) / 3_600_000;
+  const violations = row.meta?.violations ?? [];
+  const flags = row.meta?.flags ?? [];
+  return {
+    found: true,
+    at: row.created_at,
+    age_hours: Math.round(ageHours * 10) / 10,
+    stale: !(ageHours <= DEPLOY_DRIFT_MAX_AGE_HOURS),
+    summary: row.summary,
+    violations_count: violations.length,
+    violations,
+    flags,
+    checked: row.meta?.checked ?? null,
+  };
 }
 
 /**
