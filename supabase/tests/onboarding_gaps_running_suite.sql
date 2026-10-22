@@ -32,10 +32,15 @@ begin
               then 'pass' else 'FAIL: relacl changed' end);
   select count(*) into n from public.projects where meta ? 'dev_automation';
   r := r || jsonb_build_object('TC-SB625-02.stale_key', case when n = 0 then 'pass' else 'FAIL: ' || n || ' projects carry it' end);
+  -- Any quoted 'dev_automation' literal, in any non-system schema, counts as a reader, except
+  -- set_project_dev_automation, which only uses it as a return key for cached board shells.
   select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace
-   where s.nspname = 'public' and p.prosrc ~ $re$meta\s*->>?\s*'dev_automation'$re$;
+   where s.nspname not in ('pg_catalog', 'information_schema') and s.nspname not like 'pg\_%'
+     and p.prosrc ~* $re$'dev_automation'$re$
+     and p.oid <> 'public.set_project_dev_automation(uuid,boolean)'::regprocedure;
   select n + count(*) into n from pg_class c join pg_namespace s on s.oid = c.relnamespace
-   where s.nspname = 'public' and c.relkind in ('v', 'm') and pg_get_viewdef(c.oid) ~ $re$'dev_automation'$re$;
+   where s.nspname not in ('pg_catalog', 'information_schema') and s.nspname not like 'pg\_%'
+     and c.relkind in ('v', 'm') and pg_get_viewdef(c.oid) ~* $re$'dev_automation'$re$;
   r := r || jsonb_build_object('TC-SB625-02.readers', case when n = 0 then 'pass' else 'FAIL: ' || n || ' readers' end);
 
   -- TC-SB625-01 fixtures. Not meta.qa_fixture: the view leaves those agents out by design.

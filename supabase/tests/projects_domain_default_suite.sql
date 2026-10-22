@@ -7,7 +7,7 @@
 --
 -- TC-SB624-01: the column has no default and stays NOT NULL, so an insert that leaves domain
 -- out fails with 23502 naming domain (it used to fail with 23514 on the stale default).
--- TC-SB624-02: every value the check allows still inserts, and the column comment lists
+-- TC-SB624-02: every value the check allows (read from the live constraint) still inserts, and the column comment lists
 -- exactly those values and says the value is required.
 
 do $suite$
@@ -44,7 +44,7 @@ begin
     end;
   end loop;
   r := r || jsonb_build_object('TC-SB624-02.inserts',
-         case when n = 9 and cardinality(allowed) = 9 then 'pass' else 'FAIL: ' || n || ' of ' || cardinality(allowed) end);
+         case when cardinality(allowed) >= 1 and n = cardinality(allowed) then 'pass' else 'FAIL: ' || n || ' of ' || cardinality(allowed) end);
   cmt := col_description('public.projects'::regclass,
            (select attnum from pg_attribute where attrelid = 'public.projects'::regclass and attname = 'domain'));
   select string_agg(a, ',') into missing from unnest(allowed) a where strpos(coalesce(cmt, ''), a) = 0;

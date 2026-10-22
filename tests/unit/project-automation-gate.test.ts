@@ -43,7 +43,7 @@ test("the newest set_project_dev_automation writes automation_status, not meta",
 
 // SB-625: the onboarding audit decides "running" the way the runner does.
 test("the newest vw_agent_onboarding_gaps reads automation_status only", () => {
-  const re = /create\s+or\s+replace\s+view\s+(?:public\.)?vw_agent_onboarding_gaps\b[\s\S]*?;/i;
+  const re = /create\s+(?:or\s+replace\s+)?view\s+(?:public\.)?vw_agent_onboarding_gaps\b[\s\S]*?;/i;
   const defs = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()
     .filter((f) => re.test(readFileSync(join(MIGRATIONS, f), "utf8")));
   assert.ok(defs.length >= 2, `expected several definitions of the view, found ${defs.join(", ")}`);

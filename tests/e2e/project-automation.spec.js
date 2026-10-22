@@ -4,7 +4,8 @@
 // Before SB-623 the toggle read and wrote meta.dev_automation, a key nothing reads any
 // more, so the board could show "on" for a project the runner skipped (and the
 // reverse). The fixture sets the two disagreeing on purpose: Alpha is paused with a
-// stale meta.dev_automation='on', Beta is active with no meta key at all. A board that
+// stale meta.dev_automation='on', Beta is active with no meta.dev_automation (it
+// carries only a dead dev_automation_config, for TC-SB625-03). A board that
 // still reads meta gets both wrong.
 //
 // Enabling now really starts agents, so it asks first; pausing does not. A failed RPC
