@@ -46,7 +46,8 @@ begin
     from pg_policy p join pg_class c on c.oid = p.polrelid
    where c.relnamespace = 'public'::regnamespace
      and regexp_replace(coalesce(pg_get_expr(p.polqual, p.polrelid), '') || ' ' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), ''),
-                        'SELECT auth\.(uid|jwt|role)\(\) AS (uid|jwt|role)', '', 'g') ~ 'auth\.(uid|jwt|role)\(\)';
+                        '\( SELECT (auth\.\w+\(\)|current_setting\(''request\.jwt[^'']*''::text(, true)?\)) AS \w+\)', '', 'gi')
+         ~* '(auth\.\w+\(\)|current_setting\(''request\.jwt)';
   r := r || jsonb_build_object('TC-SB621-01.class_guard', case when n = 0 then 'pass' else 'FAIL: ' || n || ' bare: ' || bad end);
 
   -- TC-SB621-02 visibility

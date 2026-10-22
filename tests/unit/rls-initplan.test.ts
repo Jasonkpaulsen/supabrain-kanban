@@ -25,10 +25,13 @@ function policyStatements(sql: string): string[] {
 }
 
 // A call is fine when it is the whole of a scalar subquery: (select auth.uid()), in either
-// the written form or the deparsed one, ( SELECT auth.uid() AS uid).
+// the written form or the deparsed one, ( SELECT auth.uid() AS uid). Any auth.<fn>(), quoted
+// or not, and a per-row current_setting('request.jwt…') count as bare.
+const AUTH_CALL = String.raw`"?auth"?\s*\.\s*"?\w+"?\s*\(\s*\)`;
+const JWT_SETTING = String.raw`current_setting\s*\(\s*'request\.jwt[^']*'(?:\s*,\s*\w+)?\s*\)`;
 function bareCalls(stmt: string): string[] {
-  const wrapped = /\(\s*select\s+auth\.(?:uid|jwt|role)\(\)(?:\s+as\s+\w+)?\s*\)/gi;
-  return stmt.replace(wrapped, "").match(/\bauth\.(?:uid|jwt|role)\(\)/gi) ?? [];
+  const wrapped = new RegExp(String.raw`\(\s*select\s+(?:${AUTH_CALL}|${JWT_SETTING})(?:\s+as\s+\w+)?\s*\)`, "gi");
+  return stmt.replace(wrapped, "").match(new RegExp(`${AUTH_CALL}|${JWT_SETTING}`, "gi")) ?? [];
 }
 
 test("the detector tells wrapped calls from bare ones", () => {
@@ -38,6 +41,13 @@ test("the detector tells wrapped calls from bare ones", () => {
   assert.equal(bareCalls("create policy p on t with check (exists (select 1 from c where c.o = auth.uid()));").length, 1);
   assert.equal(bareCalls("create policy p on t using ((auth.jwt() ->> 'role') = 'x');").length, 1);
   assert.equal(policyStatements("-- create policy x on t using (auth.uid() = u);\nselect 1;").length, 0);
+  // Found by the SB-621 verifier: other auth functions, quoting, spacing, the raw JWT setting.
+  assert.equal(bareCalls("create policy p on t using (auth.email() = email);").length, 1);
+  assert.equal(bareCalls('create policy p on t using ("auth"."uid"() = user_id);').length, 1);
+  assert.equal(bareCalls("create policy p on t using (auth.uid () = user_id);").length, 1);
+  assert.equal(bareCalls("create policy p on t using ((current_setting('request.jwt.claims', true))::jsonb ->> 'sub' = u);").length, 1);
+  assert.deepEqual(bareCalls("create policy p on t using (((select current_setting('request.jwt.claims', true)))::jsonb ->> 'sub' = u);"), []);
+  assert.deepEqual(bareCalls('create policy p on t using ((select "auth"."uid"()) = user_id);'), []);
 });
 
 test("the SB-621 migration itself leaves no bare call", () => {
