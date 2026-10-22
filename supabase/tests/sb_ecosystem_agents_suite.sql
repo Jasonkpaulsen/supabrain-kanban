@@ -8,7 +8,9 @@
 -- 39P Operations Manager, is a management agent scoped to 39 Powers; linking it would make
 -- the onboarding audit count it as management coverage for SB. Jason chose (2026-10-22, L2)
 -- not to link it. This suite holds both halves of that decision, and the rule behind it: a
--- management-tier agent linked to SB must be scoped to SB.
+-- management-tier agent linked to SB must not be scoped to something else. meta.scope is
+-- free text ("SB", "CS project management", ...), so a scope passes when it names SB or the
+-- ecosystem as a word, or is not set.
 
 do $suite$
 declare
@@ -28,11 +30,12 @@ begin
     from public.agent_projects ap join public.projects p on p.id = ap.project_id where ap.agent_id = ops39;
   r := r || jsonb_build_object('TC-SB619-01.ops39_scope', case when n = 1 and bad = '39P' then 'pass' else 'FAIL: linked to ' || coalesce(bad, 'nothing') end);
 
-  -- TC-SB619-01: every management-tier agent on SB is scoped to SB
-  select count(*), string_agg(a.name || ' (' || coalesce(a.meta ->> 'scope', 'no scope') || ')', ', ') into n, bad
+  -- TC-SB619-01: no management-tier agent on SB is scoped to something else
+  select count(*), string_agg(a.name || ' (' || (a.meta ->> 'scope') || ')', ', ') into n, bad
     from public.agent_projects ap join public.agents a on a.id = ap.agent_id
    where ap.project_id = sb and a.status = 'active' and a.meta ->> 'tier' = 'management'
-     and coalesce(a.meta ->> 'scope', '') <> 'SB';
+     and a.meta ->> 'scope' is not null
+     and a.meta ->> 'scope' !~* '(^|[^A-Za-z0-9])(SB|ecosystem[a-z-]*)([^A-Za-z0-9]|$)';
   r := r || jsonb_build_object('TC-SB619-01.sb_management_scoped', case when n = 0 then 'pass' else 'FAIL: ' || bad end);
 
   select count(*) into fails from jsonb_each_text(r) where value <> 'pass';

@@ -41,9 +41,12 @@ begin
   r := r || jsonb_build_object('TC-SB618-02.prompts_present', case when n = 0 then 'pass' else 'FAIL: ' || n || ' empty prompts' end);
   -- the instruction names objects that exist
   r := r || jsonb_build_object('TC-SB618-02.objects_exist',
-         case when to_regclass('public.vw_project_architecture') is not null and to_regclass('public.decisions') is not null
-                   and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'decisions' and column_name = 'supersedes_id')
-              then 'pass' else 'FAIL: decisions or vw_project_architecture missing' end);
+         case when (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'vw_project_architecture'
+                      and column_name in ('project_key', 'domain', 'version')) = 3
+               and (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'decisions'
+                      and column_name in ('project_id', 'title', 'decision', 'reasoning', 'alternatives_considered', 'domain',
+                                          'status', 'work_item_id', 'supersedes_id', 'version')) = 10
+              then 'pass' else 'FAIL: a column the constraint names is missing from decisions or vw_project_architecture' end);
 
   select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
   if fails = 0 then
