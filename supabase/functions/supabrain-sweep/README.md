@@ -173,8 +173,13 @@ test files are not deployed.
 
 The database cannot see which version of an edge function is live, so every deploy of
 any function in `supabase/functions/` is recorded in `public.edge_function_deploys`. The
-daily deploy-drift check compares that ledger with main; a deploy that is not recorded is
-invisible to it.
+daily deploy-drift check compares that ledger with main, in that direction only:
+
+- a deploy that is not recorded is invisible to it;
+- a function or file that exists on main but was never recorded as deployed raises
+  nothing, because listing main would need the GitHub API, which the check avoids.
+
+So recording every deploy is what makes the check true.
 
 1. Deploy, then note the `version` and `ezbr_sha256` that `list_edge_functions` reports.
 2. Hash each deployed source file exactly as committed: `git show <commit>:supabase/functions/<slug>/<file> | sha256sum`.
