@@ -21,7 +21,9 @@ function buildPayload() {
   const p = JSON.parse(JSON.stringify(BASE));
   for (const proj of p.projects) {
     if (proj.id === ALPHA) { proj.automation_status = 'paused'; proj.meta = { ...proj.meta, dev_automation: 'on' }; }
-    else proj.automation_status = 'active';
+    // SB-625: Beta carries a per-project WIP config that nothing applies; the dashboard
+    // must not present it as a cap.
+    else { proj.automation_status = 'active'; proj.meta = { ...proj.meta, dev_automation_config: { wip_limit_per_run: 3 } }; }
   }
   return p;
 }
@@ -72,6 +74,15 @@ for (const s of SURFACES) {
       await expectState(page, s, false);
       await pick(page, BETA);
       await expectState(page, s, true);
+      expect(errs).toEqual([]);
+    });
+
+    test(`TC-SB625-03 ${s.name}: no per-project WIP hint, even when meta carries a config`, async ({ page }) => {
+      const errs = await s.open(page);
+      await pick(page, BETA);
+      await expectState(page, s, true);
+      await expect(page.locator('#proj-auto-hint')).toHaveCount(0);
+      await expect(page.locator(s.wrap)).not.toContainText(/WIP/i);
       expect(errs).toEqual([]);
     });
 

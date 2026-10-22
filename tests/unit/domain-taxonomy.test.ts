@@ -62,6 +62,30 @@ test("the allowed set is read from the migration history", () => {
   assert.ok(ALLOWED.length >= 8, `only ${ALLOWED.length} domains parsed from ${source}`);
 });
 
+// SB-624: the column default is part of the taxonomy too. It was 'professional' from
+// 20260604015042 and the check stopped accepting it four days later, so an insert that
+// relied on it failed for months. Replay every ALTER TABLE projects statement that sets or
+// removes the default; what is left must be absent or a member of the newest check.
+function domainDefault(): { file: string; value: string | null } {
+  let state: { file: string; value: string | null } = { file: "(none)", value: null };
+  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
+    for (const stmt of readFileSync(join(MIGRATIONS, file), "utf8").split(";")) {
+      if (!/alter\s+table\s+(?:only\s+)?(?:if\s+exists\s+)?(?:public\.)?projects\b/i.test(stmt)) continue;
+      const set = stmt.match(/(?:add\s+column\s+(?:if\s+not\s+exists\s+)?domain\b[^,]*?\bdefault|alter\s+column\s+domain\s+set\s+default)\s+'([^']*)'/i);
+      if (set) state = { file, value: set[1] };
+      else if (/alter\s+column\s+domain\s+drop\s+default/i.test(stmt)) state = { file, value: null };
+    }
+  }
+  return state;
+}
+
+test("projects.domain default is absent or allowed by the newest check", () => {
+  const d = domainDefault();
+  assert.notEqual(d.file, "(none)", "no migration touches the projects.domain default; the replay found nothing");
+  assert.ok(d.value === null || ALLOWED.includes(d.value),
+    `default '${d.value}' (from ${d.file}) is not allowed by ${source}`);
+});
+
 for (const page of DASHBOARDS) {
   const src = readFileSync(join(ROOT, page), "utf8");
 

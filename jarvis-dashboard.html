@@ -392,7 +392,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div class="board-header">
       <div class="board-header-left">
         <div class="proj-pills" id="proj-pills"></div>
-        <span id="proj-auto-wrap" style="display:none;align-items:center;gap:6px;margin-left:10px"><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Dev Automation</span><button class="auto-tgl" id="proj-auto-tgl" data-on="0">off</button><span id="proj-auto-hint" style="font-size:11px;color:var(--text-muted)"></span></span>
+        <span id="proj-auto-wrap" style="display:none;align-items:center;gap:6px;margin-left:10px"><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Dev Automation</span><button class="auto-tgl" id="proj-auto-tgl" data-on="0">off</button></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <input type="text" class="search-input" id="search-input" placeholder="Search tickets...">
@@ -1246,7 +1246,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()
 document.getElementById('m-status').addEventListener('change', syncStatusDot);
 /* ── Per-project dev-automation toggle (ADR-GOV-001) ── */
 function renderProjAutoToggle(){
-  var wrap=document.getElementById('proj-auto-wrap'), btn=document.getElementById('proj-auto-tgl'), hint=document.getElementById('proj-auto-hint');
+  var wrap=document.getElementById('proj-auto-wrap'), btn=document.getElementById('proj-auto-tgl');
   if(currentProject==='all'){ wrap.style.display='none'; return; }
   var p=allProjects.find(function(x){return x.id===currentProject;});
   if(!p){ wrap.style.display='none'; return; }
@@ -1254,8 +1254,7 @@ function renderProjAutoToggle(){
   wrap.style.display='inline-flex';
   btn.dataset.on=on?'1':'0'; btn.classList.toggle('on',on); btn.textContent=on?'on':'off';
   btn.disabled=(navigator.onLine===false);
-  var cfg=p.meta&&p.meta.dev_automation_config;
-  hint.textContent=on&&cfg&&cfg.wip_limit_per_run?('WIP cap: '+cfg.wip_limit_per_run+'/run'):'';
+  /* SB-625: no per-project WIP hint. agent-runner caps per agent (agents.max_concurrent_tasks), not per project. */
 }
 document.getElementById('proj-auto-tgl').addEventListener('click', async function(){
   if(navigator.onLine===false){ toast('Offline — automation locked','error'); return; }

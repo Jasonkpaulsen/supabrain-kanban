@@ -20,7 +20,7 @@ declare
   r jsonb := '{}'::jsonb;
   v jsonb; st text; mt jsonb; n int; fails int;
 begin
-  -- domain is explicit: the column default 'professional' fails projects_domain_check.
+  -- domain is explicit: it is required and has no default (SB-624).
   insert into public.projects (name, user_id, domain, automation_status, meta)
   values ('ZZ SB623 toggle fixture', ub, 'operations', 'paused', '{"keep": 1}'::jsonb)
   returning id into pid;

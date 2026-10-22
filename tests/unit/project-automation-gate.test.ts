@@ -41,6 +41,19 @@ test("the newest set_project_dev_automation writes automation_status, not meta",
   assert.doesNotMatch(body.split(/\$function\$/)[0], /security\s+definer/i, `${newest} must stay SECURITY INVOKER`);
 });
 
+// SB-625: the onboarding audit decides "running" the way the runner does.
+test("the newest vw_agent_onboarding_gaps reads automation_status only", () => {
+  const re = /create\s+or\s+replace\s+view\s+(?:public\.)?vw_agent_onboarding_gaps\b[\s\S]*?;/i;
+  const defs = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()
+    .filter((f) => re.test(readFileSync(join(MIGRATIONS, f), "utf8")));
+  assert.ok(defs.length >= 2, `expected several definitions of the view, found ${defs.join(", ")}`);
+  const newest = defs[defs.length - 1];
+  const view = readFileSync(join(MIGRATIONS, newest), "utf8").match(re)![0];
+  assert.match(view, /automation_status\s*=\s*'active'/, `${newest}: running must test automation_status`);
+  assert.doesNotMatch(view, /dev_automation/, `${newest}: the view must not read meta.dev_automation`);
+  assert.match(view, /security_invoker\s*=\s*true/i, `${newest}: the view must stay security_invoker`);
+});
+
 for (const [file, reader] of [
   ["index.html", "projDevAuto"], ["jarvis-pwa.html", "projDevAuto"], ["jarvis-dashboard.html", "projDevAutomation"],
 ] as const) {
@@ -49,7 +62,8 @@ for (const [file, reader] of [
     assert.match(src, new RegExp(`function ${reader}\\(p\\)\\{\\s*return !!\\(p\\s*&&\\s*p\\.automation_status\\s*===\\s*'active'\\);\\s*\\}`));
     assert.match(src, /\/rest\/v1\/projects\?select=[^'&]*\bautomation_status\b/);
     assert.match(src, /p\.automation_status\s*=\s*body\.automation_status/);
-    assert.doesNotMatch(src, /\.dev_automation\b(?!_config)/, `${file} must not touch meta.dev_automation`);
+    // SB-625: dev_automation_config (a per-project WIP cap nothing applies) is off the boards too.
+    assert.doesNotMatch(src, /\.dev_automation(?:_config)?\b/, `${file} must not touch meta.dev_automation or its config`);
     assert.match(src, /if\s*\(\s*next\s*&&\s*!confirm\(/, `${file} must confirm before enabling`);
   });
 }
