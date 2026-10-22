@@ -119,9 +119,10 @@ export function byPriorityThenAge(a: WipQueueRow, b: WipQueueRow): number {
   return (a.blocked_at ?? LAST).localeCompare(b.blocked_at ?? LAST);
 }
 
-// Sorts after any timestamp. Built from its code point rather than written as a "\uffff"
-// escape, because the deploy path turned the escape into the literal character and the
-// deployed bytes stopped matching the repo (SB-617's ledger compares them).
+// Sorts after any timestamp. Built from its code point rather than written as a
+// backslash-u escape, because the deploy path turns such an escape (even one inside a
+// comment) into the literal character, and the deployed bytes then stop matching the
+// repo (SB-617's ledger compares them).
 const LAST = String.fromCharCode(0xffff);
 
 /** SB-617: the deploy-drift check runs daily at 07:25 UTC; a result older than this is stale. */

@@ -186,6 +186,7 @@ test("byPriorityThenAge: rows with no blocked_at sort last, and ops.ts carries n
   const rows = [{ priority: "high", blocked_at: null }, { priority: "high", blocked_at: "2026-10-01T00:00:00Z" }] as WipQueueRow[];
   assert.deepEqual([...rows].sort(byPriorityThenAge).map((r) => r.blocked_at), ["2026-10-01T00:00:00Z", null]);
   const ops = readFileSync(new URL("./ops.ts", import.meta.url), "utf8");
-  assert.ok(!ops.includes(String.fromCharCode(0xffff)),
-    "no literal U+FFFF in ops.ts: build it with String.fromCharCode so deployed bytes match the repo");
+  assert.ok(!ops.includes(String.fromCharCode(0xffff)), "no literal U+FFFF in ops.ts");
+  // The deploy path rewrites a backslash-u escape into the character it names, comments included.
+  assert.doesNotMatch(ops, /\\u[0-9a-fA-F]{4}/, "no backslash-u escape in ops.ts: deployed bytes would differ");
 });
