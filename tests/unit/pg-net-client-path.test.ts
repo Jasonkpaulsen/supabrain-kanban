@@ -47,3 +47,14 @@ test("no later migration redefines them as SECURITY INVOKER", () => {
   }
   assert.deepEqual(offenders, [], "keep these SECURITY DEFINER with search_path '' and no client EXECUTE");
 });
+
+// Found by the SB-514 verifier: detector_field_adoption splices caller SQL into EXECUTE, so a
+// client that can call it can call net. Only postgres and service_role may execute it.
+test("detector_field_adoption stays off the client roles", () => {
+  const fix = files.find((x) => x.startsWith("20261023193934"));
+  assert.ok(fix, "the verifier-fix migration is missing");
+  assert.match(code(fix), /revoke\s+all\s+on\s+function\s+public\.detector_field_adoption\(text,\s*text,\s*numeric\)\s+from\s+public,\s*anon,\s*authenticated/i);
+  const later = files.filter((x) => x.slice(0, 14) > "20261023193934")
+    .filter((x) => /grant\s+(?:all|execute)[^;]*detector_field_adoption[^;]*\bto\b[^;]*\b(?:public|anon|authenticated)\b/i.test(code(x)));
+  assert.deepEqual(later, [], "do not grant detector_field_adoption to client roles");
+});

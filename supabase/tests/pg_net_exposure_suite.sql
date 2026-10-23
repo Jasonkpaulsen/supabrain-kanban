@@ -1,4 +1,4 @@
--- pg_net exposure suite: TC-SB514-01, TC-SB514-02, TC-SB514-03 (SB-514).
+-- pg_net exposure suite: TC-SB514-01 .. TC-SB514-04 (SB-514).
 --
 -- Run as postgres. One transaction that always ends by raising, so the probe memory and the
 -- pg_net request it queues do not survive. Pass = the raised message starts with
@@ -8,6 +8,9 @@
 -- rule is on the path instead: no function anon or authenticated can execute calls net.http_*
 -- (TC-SB514-01). The three trigger functions client writes fire run as their owner, and a
 -- client insert still fires one (TC-SB514-02). TC-SB514-03 reports the residual grants.
+-- TC-SB514-04 (verifier, 2026-10-23): a text match for net.http_ cannot see a function that
+-- runs caller-supplied SQL, so no client-executable public function may build dynamic SQL
+-- with %s (detector_field_adoption did, and anon could run any SQL through it).
 
 do $suite$
 declare
@@ -42,6 +45,17 @@ begin
   select count(*) into q1 from net.http_request_queue;
   r := r || jsonb_build_object('TC-SB514-02.client_write_fires',
          case when st = 'inserted' and q1 - q0 = 1 then 'pass' else 'FAIL: ' || st || ', queued ' || (q1 - q0) end);
+
+  -- TC-SB514-04 no client-executable dynamic SQL built with %s
+  select string_agg(p.oid::regprocedure::text, ', ') into bad from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.prosrc ~* '\mexecute\M' and p.prosrc ~ '%s'
+     and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'));
+  r := r || jsonb_build_object('TC-SB514-04.no_client_dynamic_sql', case when bad is null then 'pass' else 'FAIL: ' || bad end);
+  r := r || jsonb_build_object('TC-SB514-04.detector_adoption_service_only',
+         case when not has_function_privilege('anon', 'public.detector_field_adoption(text,text,numeric)', 'execute')
+                   and not has_function_privilege('authenticated', 'public.detector_field_adoption(text,text,numeric)', 'execute')
+                   and has_function_privilege('service_role', 'public.detector_field_adoption(text,text,numeric)', 'execute')
+              then 'pass' else 'FAIL' end);
 
   -- TC-SB514-03 residual platform default, reported
   r := r || jsonb_build_object('TC-SB514-03.evidence', format('net: %s of %s functions executable by anon (PUBLIC grant by %s); pgsodium: %s executable by anon; neither schema exposed (pgrst.db_schemas %s)',

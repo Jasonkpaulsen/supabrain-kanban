@@ -1,4 +1,4 @@
--- Agent memory access suite: TC-SB581-01 .. TC-SB581-04 (SB-581, ADR-MEM-001).
+-- Agent memory access suite: TC-SB581-01 .. TC-SB581-05 (SB-581, ADR-MEM-001).
 --
 -- Run as postgres. One transaction that always ends by raising, so the fixture projects,
 -- agents, memberships and memories (and the pg_net requests their inserts queue) do not
@@ -12,7 +12,7 @@
 --   mAp  A's private memory, written in Q     -> owner-only
 --   mB   B's project memory, written in Q     -> hidden from U
 --   mG   global memory                        -> everyone, as before
--- S is a stranger with no membership anywhere.
+-- S is a stranger with no membership anywhere. X is another real user with their own project R.
 
 do $suite$
 declare
@@ -20,12 +20,15 @@ declare
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   u constant uuid := '0dd94a9f-1890-48b0-9e4f-a4bbfff949f0';
   s constant uuid := gen_random_uuid();
-  p uuid; q uuid; a uuid; b uuid; ma uuid; map uuid; mb uuid; mg uuid;
+  x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
+  st2 text; st3 text; st4 text;
+  p uuid; q uuid; rr uuid; a uuid; b uuid; ma uuid; map uuid; mb uuid; mg uuid;
   emb extensions.vector := ('[' || array_to_string(array_fill(0.01::float8, array[1536]), ',') || ']')::extensions.vector;
   sel text; old_inner_md5 constant text := '0d293905300c3c0b5f0f012d71b1cd33';
 begin
   insert into public.projects (name, domain, user_id, shared) values ('qa-sb581 P', 'operations', o, true) returning id into p;
   insert into public.projects (name, domain, user_id, shared) values ('qa-sb581 Q', 'operations', o, false) returning id into q;
+  insert into public.projects (name, domain, user_id, shared) values ('qa-sb581 R', 'operations', x, false) returning id into rr;
   insert into public.project_members (project_id, user_id, role) values (p, u, 'viewer');
   insert into public.agents (user_id, name, status) values (o, 'qa-sb581 agent A', 'paused') returning id into a;
   insert into public.agents (user_id, name, status) values (o, 'qa-sb581 agent B', 'paused') returning id into b;
@@ -58,7 +61,8 @@ begin
   reset role;
   r := r || jsonb_build_object('TC-SB581-01.owner_sees_all', case when n = 4 then 'pass' else 'FAIL: ' || n || ' of 4' end);
 
-  -- TC-SB581-02: the old expression is kept verbatim; write rules unchanged; U still cannot write.
+  -- TC-SB581-02: the old expression is kept verbatim; write rules as pinned (the hashes are the
+  -- 20261023193934 agent_id checks); U still cannot write.
   select pg_get_expr(polqual, polrelid) into sel from pg_policy where polrelid = 'public.memories'::regclass and polname = 'users_select_own';
   r := r || jsonb_build_object('TC-SB581-02.old_expression_kept',
          case when md5(substring(sel from 2 for strpos(sel, ' OR ((agent_id IS NOT NULL)') - 2)) = old_inner_md5
@@ -66,8 +70,8 @@ begin
               then 'pass' else 'FAIL: ' || left(sel, 80) end);
   select string_agg(polname, ', ') into bad from (values
       ('Service role full access', 'fe2e7aa3a94b94b876d7713f1517686d'), ('oauth_client_deny', '35c27e4104835e0eb15f1858a47ebab9'),
-      ('users_delete_own', 'a1fc7aa105a1b503f03297d4c928519f'), ('users_insert_own', '14588e98850852aae627a1e73165f848'),
-      ('users_update_own', '9d3e163a61034737f1503c0e69a944d7')) v(polname, h)
+      ('users_delete_own', 'a1fc7aa105a1b503f03297d4c928519f'), ('users_insert_own', '410bf5f8773b6324dac4f692f89f31a9'),
+      ('users_update_own', '1f29739ae91aac5e4e4a0b79e2948df9')) v(polname, h)
    where not exists (select 1 from pg_policy pp where pp.polrelid = 'public.memories'::regclass and pp.polname = v.polname
                        and md5(coalesce(pg_get_expr(pp.polqual, pp.polrelid), '') || '|' || coalesce(pg_get_expr(pp.polwithcheck, pp.polrelid), '')) = v.h);
   r := r || jsonb_build_object('TC-SB581-02.write_policies_unchanged',
@@ -100,8 +104,35 @@ begin
                    and not has_function_privilege('anon', 'public.match_memories(extensions.vector,integer,uuid,uuid,text[],text[],text)', 'execute')
               then 'pass' else 'FAIL' end);
 
+  -- TC-SB581-05 (verifier, 2026-10-23): reading through an agent cannot be bought by writing.
+  -- U, a viewer of P, cannot link O's agent B to P; X cannot tag a memory in X's own project
+  -- with O's agent A (it would reach A's users); O still can do both.
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.agent_projects (agent_id, project_id, user_id) values (b, p, u); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  reset role;
+  perform set_config('request.jwt.claims', json_build_object('sub', x, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.memories (project_id, type, content, user_id, agent_id, scope) values (rr, 'insight', 'qa-sb581 planted', x, a, 'project'); st2 := 'inserted';
+  exception when others then st2 := sqlstate; end;
+  reset role;
+  perform set_config('request.jwt.claims', json_build_object('sub', o, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.agent_projects (agent_id, project_id, user_id) values (a, q, o); st3 := 'inserted';
+  exception when others then st3 := sqlstate; end;
+  begin insert into public.memories (project_id, type, content, user_id, agent_id, scope) values (q, 'insight', 'qa-sb581 own', o, b, 'project'); st4 := 'inserted';
+  exception when others then st4 := sqlstate; end;
+  reset role;
+  r := r || jsonb_build_object('TC-SB581-05.no_link_hijack', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
+  r := r || jsonb_build_object('TC-SB581-05.no_memory_planting', case when st2 = '42501' then 'pass' else 'FAIL: ' || st2 end);
+  r := r || jsonb_build_object('TC-SB581-05.owner_still_writes', case when st3 = 'inserted' and st4 = 'inserted' then 'pass' else 'FAIL: link ' || st3 || ', memory ' || st4 end);
+
   -- TC-SB581-04: over the real rows, every row the agent path adds is non-private, carries an
   -- agent the user can use, and is not readable by the old rule. Measured at review: 1.
+  -- Clear the claims first: can_access_agent refuses to answer for anyone but auth.uid(), so a
+  -- leftover subject from the checks above would make every other user's count 0.
+  perform set_config('request.jwt.claims', '', true);
   select count(*), count(*) filter (where mm.scope = 'private' or mm.agent_id is null) into n, fails
     from public.memories mm cross join (select id from auth.users) usr
    where mm.content not like 'qa-sb581 %'

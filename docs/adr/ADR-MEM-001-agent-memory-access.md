@@ -54,6 +54,17 @@ The migration asserts against a snapshot taken before the change that:
 - the other five policies are identical;
 - `match_memories` is still invoker and has the new filter.
 
+### 3a. Write rules that keep the read rule honest (verifier, 2026-10-23)
+
+The independent verifier found that the read path could be obtained by writing. Migration `20261023193934_sb581_sb514_verifier_fixes.sql` closes both routes. Each policy keeps its old check as the first part, and every existing row already meets the new rules.
+
+| Hole | Before | After |
+|------|--------|-------|
+| Linking someone else's agent | A viewer of a shared project could link any agent to that project, because `agent_projects` writes checked only `user_id = auth.uid()`. That made `can_access_agent` true and exposed the agent's memories. | A link needs the writer to own the agent, and to own the project or be its owner or editor. |
+| Planting a memory | Any user could tag a memory with another user's agent, so the agent's users would read it. | `agent_id` must be null, an agent the writer owns, or one the writer can use. This applies to both insert and update. |
+
+TC-SB581-05 covers both, plus a positive control showing the owner can still link and tag.
+
 ## 4. Exposure
 
 The change is intentionally cross-project. A non-private agent memory is readable by every user of that agent.

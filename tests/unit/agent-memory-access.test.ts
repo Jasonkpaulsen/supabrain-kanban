@@ -46,3 +46,23 @@ test("the newest match_memories recalls global rows for an agent and stays invok
   assert.doesNotMatch(def.split(/\$function\$/)[0], /security\s+definer/i, `${f}: match_memories must stay SECURITY INVOKER`);
   assert.match(def.split(/\$function\$/)[0], /set\s+search_path\s+to\s+''/i, `${f}: search_path must stay pinned`);
 });
+
+// Found by the SB-581 verifier: reading through an agent must not be obtainable by writing.
+// Linking an agent needs the agent's owner; tagging a memory with an agent needs an agent the
+// writer owns or can use.
+const WRITE_POLICY = (table: string, name: string) =>
+  new RegExp(String.raw`\balter\s+policy\s+"?${name}"?\s+on\s+(?:public\.)?${table}\b[\s\S]*?;`, "gi");
+
+test("the newest agent_projects and memories write checks keep the agent rules", () => {
+  for (const [table, name, rule] of [
+    ["agent_projects", "users_insert_own", /from\s+public\.agents\s+a\s+where\s+a\.id\s*=\s*agent_projects\.agent_id\s+and\s+a\.user_id\s*=/i],
+    ["agent_projects", "users_update_own", /from\s+public\.agents\s+a\s+where\s+a\.id\s*=\s*agent_projects\.agent_id\s+and\s+a\.user_id\s*=/i],
+    ["memories", "users_insert_own", /agent_id\s+is\s+null[\s\S]*can_access_agent\s*\(\s*agent_id/i],
+    ["memories", "users_update_own", /agent_id\s+is\s+null[\s\S]*can_access_agent\s*\(\s*agent_id/i],
+  ] as const) {
+    const stmts = files.flatMap((f) => (code(f).match(WRITE_POLICY(table, name)) ?? []).map((s) => [f, s] as const));
+    assert.ok(stmts.length >= 1, `${table}.${name}: no ALTER POLICY found`);
+    const [f, s] = stmts[stmts.length - 1];
+    assert.match(s, rule, `${f}: ${table}.${name} lost its agent rule`);
+  }
+});
