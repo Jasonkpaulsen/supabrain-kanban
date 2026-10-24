@@ -24,7 +24,7 @@ const A2 = '22222222-2222-4222-8222-222222222222';
 const now = new Date().toISOString();
 const article = (id, title) => ({ id, title, status: 'trashed', updated_at: now, created_at: now, body_md: '', feedback_history: [] });
 const image = (id, path, articleId, status = 'candidate') =>
-  ({ id, storage_path: path, article_id: articleId, status, description: `img ${id}`, public_url: `https://x.test/${path}`, sort_order: 0, updated_at: now });
+  ({ id, storage_path: path, storage_bucket: 'project-assets', article_id: articleId, status, description: `img ${id}`, public_url: `https://x.test/${path}`, sort_order: 0, updated_at: now });
 
 function seed() {
   return {
@@ -35,6 +35,9 @@ function seed() {
       image('i3', `lce-images/${A2}/candidate-1.png`, A2),
       image('lib1', 'lce-images/library/saved-1.png', null, 'saved'),
       image('nofile', null, null, 'saved'),
+      // two rows on one path, as analyze-image leaves after a re-upload
+      image('dupA', 'lce-images/library/dup.png', null, 'saved'),
+      image('dupB', 'lce-images/library/dup.png', null, 'saved'),
     ],
   };
 }
@@ -55,9 +58,12 @@ function filterRows(url, rows) {
   });
 }
 
-async function openStudio(page, { removes = () => [], storageStatus = 200, storageAbort = false } = {}) {
+// removes(path): whether the Storage DELETE may take that file (false models a file RLS hides).
+// Files are state: a removed file is gone for good, and HEAD on its public URL then answers 400.
+async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false } = {}) {
   const db = seed();
-  const calls = { storage: [], deletes: [], logs: [] };
+  db.files = new Set(db.images.map((i) => i.storage_path).filter(Boolean));
+  const calls = { storage: [], deletes: [], logs: [], heads: [] };
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -78,9 +84,20 @@ async function openStudio(page, { removes = () => [], storageStatus = 200, stora
     calls.storage.push(asked);
     if (storageAbort) return r.abort('failed');
     if (storageStatus !== 200) return r.fulfill({ status: storageStatus, headers: CORS, contentType: 'application/json', body: '{"message":"boom"}' });
-    const gone = asked.filter((p) => removes(p));
+    const gone = [...new Set(asked)].filter((p) => db.files.has(p) && removes(p));
+    gone.forEach((p) => db.files.delete(p));
     return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json',
       body: JSON.stringify(gone.map((name) => ({ name, bucket_id: 'project-assets' }))) });
+  });
+  await page.route('**/storage/v1/object/public/project-assets/**', (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    const path = decodeURIComponent(new URL(req.url()).pathname.split('/storage/v1/object/public/project-assets/')[1]);
+    calls.heads.push(path);
+    // storage-api answers 400 {"statusCode":"404"} for a missing public object
+    return db.files.has(path)
+      ? r.fulfill({ status: 200, headers: CORS, contentType: 'image/png', body: '' })
+      : r.fulfill({ status: 400, headers: CORS, contentType: 'application/json', body: '{"statusCode":"404","error":"not_found"}' });
   });
   await page.route('**/rest/v1/**', async (r) => {
     const req = r.request();
@@ -89,11 +106,19 @@ async function openStudio(page, { removes = () => [], storageStatus = 200, stora
     const table = new URL(url).pathname.split('/').pop();
     const rows = table === 'articles' ? db.articles : table === 'image_assets' ? db.images : [];
     if (req.method() === 'GET') {
+      if (failImageGet && table === 'image_assets' && /article_id=/.test(url)) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"lookup down"}' });
+      }
       const out = filterRows(url, rows);
       const single = (req.headers()['accept'] || '').includes('vnd.pgrst.object');
       return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(single ? out[0] || null : out) });
     }
     if (req.method() === 'DELETE') {
+      if (table === 'image_assets' && failImageDeletes > 0) {
+        failImageDeletes -= 1;
+        calls.deletes.push({ table, ids: [], failed: true });
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"row delete down"}' });
+      }
       const hit = filterRows(url, rows);
       calls.deletes.push({ table, ids: hit.map((x) => x.id) });
       if (table === 'articles') db.articles = db.articles.filter((x) => !hit.includes(x));
@@ -148,7 +173,7 @@ test.describe('@sb631 Article Studio removals', () => {
   });
 
   test('TC-SB631-02 library image: a real removal removes the row and logs it', async ({ page }) => {
-    const { calls, errors } = await openStudio(page, { removes: () => true });
+    const { calls, errors } = await openStudio(page);
     await deleteLibraryImage(page, 'img lib1');
     await expect(toast(page)).toHaveText('Deleted');
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['lib1'] }]);
@@ -202,5 +227,63 @@ test.describe('@sb631 Article Studio removals', () => {
     expect(calls.storage).toEqual([]);
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['nofile'] }]);
     expect(errors).toEqual([]);
+  });
+
+  // The browser logs the injected 503s and the existence check's 400 ("already gone") as failed
+  // resource loads; nothing else may be logged.
+  const EXPECTED_HTTP = /status of (400|503)/;
+
+  // Verifier, 2026-10-24: an empty removal answer also means "already gone". Without the HEAD
+  // check, a row whose file went but whose row delete failed could never be removed.
+  test('TC-SB631-06a library image: a retry after a failed row delete removes the row', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { failImageDeletes: 1 });
+    await deleteLibraryImage(page, 'img lib1');
+    await expect(toast(page)).toHaveText(/^Image not removed: /);
+    expect(db.files.has('lce-images/library/saved-1.png')).toBe(false);
+    expect(calls.logs).toEqual([]);
+    await page.locator('#libGrid .card', { hasText: 'img lib1' }).locator('button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.heads).toContain('lce-images/library/saved-1.png');
+    expect(deletesOf(calls, 'image_assets').filter((d) => !d.failed)).toEqual([{ table: 'image_assets', ids: ['lib1'] }]);
+    expect(calls.logs).toEqual([expect.objectContaining({ entity_id: 'lib1', reason: 'manual_delete' })]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-06b article in Trash: a retry after a failed row delete removes the article', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { failImageDeletes: 1 });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText(/^Images not removed: /);
+    expect(deletesOf(calls, 'articles')).toEqual([]);
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(deletesOf(calls, 'image_assets').filter((d) => !d.failed)).toEqual([{ table: 'image_assets', ids: ['i1', 'i2'] }]);
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+    expect(db.articles.map((a) => a.id)).not.toContain(A1);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-06c two rows on one path: removing the second after the first still works', async ({ page }) => {
+    const { calls, errors } = await openStudio(page);
+    await deleteLibraryImage(page, 'img dupA');
+    await expect(toast(page)).toHaveText('Deleted');
+    await expect(page.locator('#libGrid .card', { hasText: 'img dupA' })).toHaveCount(0);
+    await page.locator('#libGrid .card', { hasText: 'img dupB' }).locator('button:has-text("Delete")').click();
+    // the toast still says Deleted from the first removal, so wait on the card instead
+    await expect(page.locator('#libGrid .card', { hasText: 'img dupB' })).toHaveCount(0);
+    expect(calls.heads).toContain('lce-images/library/dup.png');
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['dupA'] }, { table: 'image_assets', ids: ['dupB'] }]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-07 a failed image lookup stops the removal', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { failImageGet: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('lookup down');
+    expect(calls.storage).toEqual([]);
+    expect(calls.deletes).toEqual([]);
+    expect(calls.logs).toEqual([]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
   });
 });
