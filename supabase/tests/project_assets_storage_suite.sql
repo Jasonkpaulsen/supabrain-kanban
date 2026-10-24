@@ -1,4 +1,4 @@
--- project-assets storage suite: TC-SB627-01 .. TC-SB627-04 (SB-627).
+-- project-assets storage suite: TC-SB627-01 .. TC-SB627-05 (SB-627).
 --
 -- Run as postgres. One transaction that always ends by raising, so the fixture objects, the
 -- image_assets rows and the analyze-image requests their uploads queue do not survive. Pass =
@@ -11,20 +11,22 @@
 -- the removal policy to the same expression.
 --
 -- Fixture: two objects under qa-sb627/, each with an image_assets row: own.png belongs to O,
--- other.png to X.
+-- other.png to X. TC-SB627-05 (verifier, 2026-10-24): X cannot forge an image_assets row, or
+-- move their own row's path, to reach O's file.
 
 do $suite$
 declare
   r jsonb := '{}'::jsonb; n int; n2 int; fails int; st text; st2 text; q0 bigint; q1 bigint; names text[];
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  own_rule text; real_objects int;
+  own_rule text; real_objects int; other_id uuid; st3 text;
 begin
   select count(*) into real_objects from storage.objects where bucket_id = 'project-assets';
   insert into storage.objects (bucket_id, name, metadata) values
     ('project-assets', 'qa-sb627/own.png', '{"mimetype":"image/png"}'),
     ('project-assets', 'qa-sb627/other.png', '{"mimetype":"image/png"}');
-  insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', o), ('qa-sb627/other.png', x);
+  insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', o);
+  insert into public.image_assets (storage_path, user_id) values ('qa-sb627/other.png', x) returning id into other_id;
 
   -- TC-SB627-01: anon writes nothing.
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -67,6 +69,23 @@ begin
                    and (select pg_get_expr(polqual, polrelid) from pg_policy where polrelid = 'storage.objects'::regclass and polname = 'Allow deletes') = own_rule
                    and (select polroles from pg_policy where polrelid = 'storage.objects'::regclass and polname = 'Allow deletes') = array['authenticated'::regrole]::oid[]
               then 'pass' else 'FAIL' end);
+
+  -- TC-SB627-05: the owner rule cannot be forged through image_assets.
+  perform set_config('request.jwt.claims', json_build_object('sub', x, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', x); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  begin update public.image_assets set storage_path = 'qa-sb627/own.png' where id = other_id; st2 := 'updated';
+  exception when others then st2 := sqlstate; end;
+  begin update public.image_assets set status = 'saved' where id = other_id; get diagnostics n = row_count; st3 := 'updated';
+  exception when others then st3 := sqlstate; end;
+  select array_agg(name order by name) into names from storage.objects where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  reset role;
+  r := r || jsonb_build_object('TC-SB627-05.no_forged_row', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
+  r := r || jsonb_build_object('TC-SB627-05.no_path_move', case when st2 = '42501' then 'pass' else 'FAIL: ' || st2 end);
+  r := r || jsonb_build_object('TC-SB627-05.status_edit_still_works', case when st3 = 'updated' and n = 1 then 'pass' else 'FAIL: ' || st3 || ', ' || coalesce(n, 0) end);
+  r := r || jsonb_build_object('TC-SB627-05.other_file_still_hidden',
+         case when names = array['qa-sb627/other.png'] then 'pass' else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') end);
 
   -- TC-SB627-03: the service role still uploads and updates, and an image upload still queues analysis.
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);

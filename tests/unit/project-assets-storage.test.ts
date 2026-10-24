@@ -48,3 +48,16 @@ test("no later migration gives a storage.objects policy to PUBLIC or anon, or cl
   }
   assert.deepEqual(offenders, [], "project-assets writes stay with service_role (SB-627)");
 });
+
+// Found by the SB-627 verifier: the owner rule trusts image_assets.storage_path, so clients must
+// not create image_assets rows or move a row's path (20261024172958).
+test("image_assets paths stay service-role only", () => {
+  const f = files.find((x) => x.startsWith("20261024172958"));
+  assert.ok(f, "the forged-path fix migration is missing");
+  const sql = code(f);
+  assert.match(sql, /create\s+trigger\s+trg_image_asset_path_service_only\s+before\s+insert\s+or\s+update\s+on\s+public\.image_assets/i);
+  assert.match(sql, /current_user\s+in\s+\('anon',\s*'authenticated'\)/i);
+  const later = files.filter((x) => x.slice(0, 14) > "20261024172958")
+    .filter((x) => /trg_image_asset_path_service_only|enforce_image_asset_path_service_only/i.test(code(x)));
+  assert.deepEqual(later, [], "a later migration touches the image_assets path guard; re-run the SB-627 suite and update this test");
+});
