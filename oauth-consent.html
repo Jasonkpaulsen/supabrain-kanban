@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Approve Codex access — Paulsen Family Data</title>
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root { color-scheme: light dark; }
@@ -78,8 +79,8 @@
 <section id="result" class="card hidden"><p id="result-text"></p></section>
 
 <script>
-var SB_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
-var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+var SB_URL=window.SB_CONFIG.url;   // SB-182: see config.js
+var SB_KEY = window.SB_CONFIG.key;
 var sb = window.supabase.createClient(SB_URL, SB_KEY);
 var authId = new URLSearchParams(location.search).get('authorization_id');
 var $ = function(id){ return document.getElementById(id); };

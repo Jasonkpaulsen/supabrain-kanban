@@ -11,6 +11,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon.svg">
 <link rel="icon" href="./icon.svg">
+<script src="./config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
@@ -214,8 +215,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const SUPABASE_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
-const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+const SUPABASE_URL=window.SB_CONFIG.url;   // SB-182: see config.js
+const SUPABASE_KEY = window.SB_CONFIG.key;
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const STATUSES=['draft','in_review','needs_revision','approved','scheduled','published','trashed'];
 const LABELS={draft:'Draft',in_review:'In Review',needs_revision:'Revision',approved:'Approved',scheduled:'Scheduled',published:'Published',trashed:'Trash'};
@@ -340,9 +341,12 @@ async function approveForWriting(id){const a=ARTICLES.find(x=>x.id===id);const f
 async function backToDraft(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',approved_by:null,approved_at:null,scheduled_for:null,publish_slot_label:null,feedback_history:pushHist(a,'returned to draft','')})){toast('Returned to draft');closeSheet();load();}}
 async function trash(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'trashed',feedback_history:pushHist(a,'moved to trash','')})){toast('Moved to trash');closeSheet();load();}}
 async function restore(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',feedback_history:pushHist(a,'restored','')})){toast('Restored');closeSheet();load();}}
-async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').eq('article_id',id);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast('Deleted');closeSheet();load();}
+// SB-631: an image row goes only when its file went. A removal that reported nothing kept the
+// file, so the article stays in Trash with those images and can be retried; removing it anyway
+// would strand them (article_id is ON DELETE SET NULL and the library shows only saved images).
+async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket').eq('article_id',id);if(ie){toast(ie.message);return;}const {kept,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}if(kept.length){toast(`${kept.length} file(s) not removed — article kept in Trash`);loadArticleImages(id);return;}const {error}=await sb.from('articles').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast('Deleted');closeSheet();load();}
 async function markPublished(id){const url=prompt('LinkedIn post URL (optional):','');const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'published',published_url:url||null,feedback_history:pushHist(a,'published',url||'')})){toast('Published');closeSheet();load();}}
-async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').in('article_id',ids);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().in('id',ids);if(error){toast(error.message);return;}await logPurge((arts||[]).map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));toast(`Purged ${ids.length}`);load();}
+async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket,article_id').in('article_id',ids);if(ie){toast(ie.message);return;}const {kept,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const held=new Set(kept.map(i=>i.article_id));const go=(arts||[]).filter(a=>!held.has(a.id));if(go.length){const {error}=await sb.from('articles').delete().in('id',go.map(a=>a.id));if(error){toast(error.message);return;}await logPurge(go.map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));}toast(held.size?`Purged ${go.length}, kept ${held.size} — ${kept.length} file(s) not removed`:`Purged ${go.length}`);load();}
 
 /* images */
 async function loadArticleImages(articleId){
@@ -396,11 +400,48 @@ function renderAgenda(){
   document.getElementById('agenda').innerHTML=h;
 }
 async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger" style="padding:7px 11px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
-async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data}=await sb.from('image_assets').select('storage_path,description').eq('id',id).single();await deleteStorage([data&&data.storage_path]);const {error}=await sb.from('image_assets').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data&&data.storage_path,title:data&&data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
+async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data,error:se}=await sb.from('image_assets').select('id,storage_path,storage_bucket,description').eq('id',id).single();if(se||!data){toast(se?se.message:'Image not found');return;}const {kept,err}=await removeImages([data]);if(err){toast('Image not removed: '+err);return;}if(kept.length){toast('File not removed — image kept');renderLibrary();return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data.storage_path,title:data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
 async function renderPurged(){const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
 
 /* storage + audit helpers */
-async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);if(!paths.length)return;try{await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets`,{method:'DELETE',headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({prefixes:paths})});}catch(e){}}
+// SB-182: this sent the API key in Authorization: Bearer. That worked by
+// accident under the legacy anon JWT (any JWT parsed, and the request ran as
+// `anon`); a publishable key is rejected outright in that header, so the swap
+// would have broken it. It sends the signed-in user's session token now, which
+// is what a delete should have carried all along — the request runs as
+// `authenticated` rather than as an anonymous visitor.
+// Failures were also swallowed whole by an empty catch, so a delete that never
+// happened looked identical to one that did. It reports now.
+// SB-631: it also returns the paths the Storage API says it removed. The API answers 200 with
+// an empty list when nothing matched (RLS hid the object, a wrong path, already gone), so r.ok
+// alone cannot tell a removal from a no-op.
+async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);const gone=new Set();if(!paths.length)return gone;
+  try{
+    const {data}=await sb.auth.getSession();
+    const t=data.session&&data.session.access_token;
+    if(!t){toast('Not signed in — files were not deleted');return gone;}
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets`,{method:'DELETE',
+      headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json'},
+      body:JSON.stringify({prefixes:paths})});
+    if(!r.ok){toast('Files not deleted: '+r.status);return gone;}
+    const out=await r.json().catch(()=>[]);
+    (Array.isArray(out)?out:[]).forEach(o=>{if(o&&paths.includes(o.name))gone.add(o.name);});
+  }catch(e){toast('Files not deleted: '+e.message);}
+  return gone;}
+// An empty answer from the removal means "nothing matched": the file may be hidden from this
+// user, or already gone (an earlier removal whose row delete then failed, or a second row on the
+// same path). project-assets is public, so a HEAD on the public URL tells them apart: 400/404 is
+// gone (storage-api renders a missing key as 400), 2xx is still there, anything else is unknown and
+// keeps the row. Only project-assets is asked: a private or unknown bucket also answers 400. A CDN
+// may serve a stale 200 for a while after a removal; that keeps the row, and a later retry clears it.
+async function fileGone(i){if((i.storage_bucket||'project-assets')!=='project-assets')return false;try{const r=await fetch(`${SUPABASE_URL}/storage/v1/object/public/project-assets/${i.storage_path.split('/').map(encodeURIComponent).join('/')}`,{method:'HEAD',cache:'no-store'});return r.status===400||r.status===404;}catch(e){return false;}}
+// Removes the image_assets rows whose file went (or that have no file) and returns the rest.
+async function removeImages(imgs){imgs=imgs||[];const gone=await deleteStorage(imgs.map(i=>i.storage_path));
+  const unsure=[...new Map(imgs.filter(i=>i.storage_path&&!gone.has(i.storage_path)).map(i=>[i.storage_path,i])).values()];
+  (await Promise.all(unsure.map(async i=>(await fileGone(i))?i.storage_path:null))).forEach(p=>{if(p)gone.add(p);});
+  const done=imgs.filter(i=>!i.storage_path||gone.has(i.storage_path));
+  if(done.length){const {error}=await sb.from('image_assets').delete().in('id',done.map(i=>i.id));if(error)return {kept:imgs,err:error.message};}
+  return {kept:imgs.filter(i=>!done.includes(i)),err:null};}
 async function logPurge(rows){if(rows&&rows.length)await sb.from('lce_deletion_log').insert(rows.map(r=>({...r,user_id:USER&&USER.id})));}
 
 /* utils */
