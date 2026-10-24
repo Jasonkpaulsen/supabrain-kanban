@@ -76,6 +76,12 @@ The accepted cost: an editor cannot edit a memory in their project when it carri
 
 TC-SB581-05 now also checks that a viewer cannot tag and an editor can.
 
+**Known limit, accepted (third verification pass).** The tag rule reads `agent_projects` under the writer's own RLS. Take a project owner known only through `projects.user_id`, with no membership row. That owner cannot see links made by someone else, so they cannot tag with another user's agent linked to their project.
+
+This fails closed. RLS can only hide rows, so it causes refusals, never grants. On 2026-10-23 it affected 0 real pairs.
+
+Fixing it would take a SECURITY DEFINER helper that signed-in users can execute, which is one more finding on the advisor's list. Giving that owner a membership row also lifts the limit.
+
 ## 4. Exposure
 
 The change is intentionally cross-project. A non-private agent memory is readable by every user of that agent.
