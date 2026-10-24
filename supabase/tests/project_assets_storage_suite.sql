@@ -1,0 +1,105 @@
+-- project-assets storage suite: TC-SB627-01 .. TC-SB627-04 (SB-627).
+--
+-- Run as postgres. One transaction that always ends by raising, so the fixture objects, the
+-- image_assets rows and the analyze-image requests their uploads queue do not survive. Pass =
+-- the raised message starts with "PROJECT_ASSETS_STORAGE PASS". The message carries only check
+-- names and counts.
+--
+-- Removal is checked through its policy, not by running one: storage.protect_delete refuses
+-- direct SQL removals, and the suites write no removal statements. TC-SB627-02 proves the owner
+-- rule through SELECT (a Storage API removal reads its rows under the SELECT policies) and pins
+-- the removal policy to the same expression.
+--
+-- Fixture: two objects under qa-sb627/, each with an image_assets row: own.png belongs to O,
+-- other.png to X.
+
+do $suite$
+declare
+  r jsonb := '{}'::jsonb; n int; n2 int; fails int; st text; st2 text; q0 bigint; q1 bigint; names text[];
+  o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
+  x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
+  own_rule text; real_objects int;
+begin
+  select count(*) into real_objects from storage.objects where bucket_id = 'project-assets';
+  insert into storage.objects (bucket_id, name, metadata) values
+    ('project-assets', 'qa-sb627/own.png', '{"mimetype":"image/png"}'),
+    ('project-assets', 'qa-sb627/other.png', '{"mimetype":"image/png"}');
+  insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', o), ('qa-sb627/other.png', x);
+
+  -- TC-SB627-01: anon writes nothing.
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  set local role anon;
+  begin insert into storage.objects (bucket_id, name) values ('project-assets', 'qa-sb627/anon.png'); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  update storage.objects set metadata = '{"mimetype":"image/gif"}' where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  get diagnostics n = row_count;
+  reset role;
+  r := r || jsonb_build_object('TC-SB627-01.anon_cannot_upload', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
+  r := r || jsonb_build_object('TC-SB627-01.anon_cannot_update', case when n = 0 then 'pass' else 'FAIL: ' || n || ' rows' end);
+  r := r || jsonb_build_object('TC-SB627-01.no_public_or_anon_policy',
+         case when not exists (select 1 from pg_policy where polrelid = 'storage.objects'::regclass
+                               and (0::oid = any(polroles) or 'anon'::regrole::oid = any(polroles))) then 'pass' else 'FAIL' end);
+
+  -- TC-SB627-02: a signed-in user cannot upload or update, and sees only their own image files.
+  perform set_config('request.jwt.claims', json_build_object('sub', o, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into storage.objects (bucket_id, name, owner_id) values ('project-assets', 'qa-sb627/auth.png', o::text); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  update storage.objects set metadata = '{"mimetype":"image/gif"}' where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  get diagnostics n = row_count;
+  select array_agg(name order by name) into names from storage.objects where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  reset role;
+  r := r || jsonb_build_object('TC-SB627-02.user_cannot_upload', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
+  r := r || jsonb_build_object('TC-SB627-02.user_cannot_update', case when n = 0 then 'pass' else 'FAIL: ' || n || ' rows' end);
+  r := r || jsonb_build_object('TC-SB627-02.owner_sees_own_only',
+         case when names = array['qa-sb627/own.png'] then 'pass' else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') end);
+  perform set_config('request.jwt.claims', json_build_object('sub', x, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  select array_agg(name order by name) into names from storage.objects where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  select count(*) into n2 from storage.objects where bucket_id = 'project-assets' and name not like 'qa-sb627/%';
+  reset role;
+  r := r || jsonb_build_object('TC-SB627-02.other_user_sees_own_only',
+         case when names = array['qa-sb627/other.png'] and n2 = 0 then 'pass'
+              else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') || ', ' || n2 || ' real' end);
+  select pg_get_expr(polqual, polrelid) into own_rule from pg_policy where polrelid = 'storage.objects'::regclass and polname = 'project_assets_select_own';
+  r := r || jsonb_build_object('TC-SB627-02.remove_rule_is_owner_rule',
+         case when own_rule is not null and strpos(own_rule, '(ia.user_id = ( SELECT auth.uid() AS uid))') > 0
+                   and (select pg_get_expr(polqual, polrelid) from pg_policy where polrelid = 'storage.objects'::regclass and polname = 'Allow deletes') = own_rule
+                   and (select polroles from pg_policy where polrelid = 'storage.objects'::regclass and polname = 'Allow deletes') = array['authenticated'::regrole]::oid[]
+              then 'pass' else 'FAIL' end);
+
+  -- TC-SB627-03: the service role still uploads and updates, and an image upload still queues analysis.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  select count(*) into q0 from net.http_request_queue;
+  set local role service_role;
+  begin insert into storage.objects (bucket_id, name, metadata) values ('project-assets', 'qa-sb627/service.png', '{"mimetype":"image/png"}'); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  begin update storage.objects set metadata = '{"mimetype":"image/png","qa":"sb627"}' where bucket_id = 'project-assets' and name = 'qa-sb627/service.png';
+    get diagnostics n = row_count; st2 := 'updated';
+  exception when others then st2 := sqlstate; end;
+  reset role;
+  select count(*) into q1 from net.http_request_queue;
+  r := r || jsonb_build_object('TC-SB627-03.service_role_writes',
+         case when st = 'inserted' and st2 = 'updated' and n = 1 then 'pass' else 'FAIL: ' || st || ', ' || st2 || ', ' || coalesce(n, 0) end);
+  r := r || jsonb_build_object('TC-SB627-03.upload_queues_analysis', case when q1 - q0 = 1 then 'pass' else 'FAIL: queued ' || (q1 - q0) end);
+
+  -- TC-SB627-04: nothing else changed.
+  r := r || jsonb_build_object('TC-SB627-04.bucket_unchanged',
+         case when (select public and file_size_limit = 10485760 and allowed_mime_types = array['image/jpeg','image/png','image/gif','image/webp','image/svg+xml','application/pdf']
+                    from storage.buckets where id = 'project-assets')
+                   and real_objects = (select count(*) from storage.objects where bucket_id = 'project-assets' and name not like 'qa-sb627/%')
+              then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB627-04.policy_set',
+         case when (select string_agg(polname || ':' || polcmd::text || ':' || array_to_string(polroles::regrole[], ','), ' | ' order by polname)
+                      from pg_policy where polrelid = 'storage.objects'::regclass)
+                   = 'Allow deletes:d:authenticated | Allow updates:w:service_role | Allow uploads:a:service_role | project_assets_select_own:r:authenticated'
+              then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB627-04.evidence', format('%s real objects in project-assets', real_objects));
+
+  select count(*) into fails from jsonb_each_text(r) where key not like '%.evidence' and value <> 'pass';
+  if fails = 0 then
+    raise exception 'PROJECT_ASSETS_STORAGE PASS (% checks): %', (select count(*) from jsonb_object_keys(r) k where k not like '%.evidence'), r::text;
+  else
+    raise exception 'PROJECT_ASSETS_STORAGE FAIL (% of % checks): %', fails, (select count(*) from jsonb_object_keys(r) k where k not like '%.evidence'), r::text;
+  end if;
+end $suite$;
