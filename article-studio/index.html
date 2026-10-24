@@ -430,12 +430,15 @@ async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);const gone
   return gone;}
 // An empty answer from the removal means "nothing matched": the file may be hidden from this
 // user, or already gone (an earlier removal whose row delete then failed, or a second row on the
-// same path). The bucket is public, so a HEAD on the public URL tells them apart: 400/404 is gone,
-// 2xx is still there, anything else is unknown and keeps the row.
-async function fileGone(i){try{const r=await fetch(`${SUPABASE_URL}/storage/v1/object/public/${encodeURIComponent(i.storage_bucket||'project-assets')}/${i.storage_path.split('/').map(encodeURIComponent).join('/')}`,{method:'HEAD',cache:'no-store'});return r.status===400||r.status===404;}catch(e){return false;}}
+// same path). project-assets is public, so a HEAD on the public URL tells them apart: 400/404 is
+// gone (storage-api renders a missing key as 400), 2xx is still there, anything else is unknown and
+// keeps the row. Only project-assets is asked: a private or unknown bucket also answers 400. A CDN
+// may serve a stale 200 for a while after a removal; that keeps the row, and a later retry clears it.
+async function fileGone(i){if((i.storage_bucket||'project-assets')!=='project-assets')return false;try{const r=await fetch(`${SUPABASE_URL}/storage/v1/object/public/project-assets/${i.storage_path.split('/').map(encodeURIComponent).join('/')}`,{method:'HEAD',cache:'no-store'});return r.status===400||r.status===404;}catch(e){return false;}}
 // Removes the image_assets rows whose file went (or that have no file) and returns the rest.
 async function removeImages(imgs){imgs=imgs||[];const gone=await deleteStorage(imgs.map(i=>i.storage_path));
-  for(const i of imgs){if(i.storage_path&&!gone.has(i.storage_path)&&await fileGone(i))gone.add(i.storage_path);}
+  const unsure=[...new Map(imgs.filter(i=>i.storage_path&&!gone.has(i.storage_path)).map(i=>[i.storage_path,i])).values()];
+  (await Promise.all(unsure.map(async i=>(await fileGone(i))?i.storage_path:null))).forEach(p=>{if(p)gone.add(p);});
   const done=imgs.filter(i=>!i.storage_path||gone.has(i.storage_path));
   if(done.length){const {error}=await sb.from('image_assets').delete().in('id',done.map(i=>i.id));if(error)return {kept:imgs,err:error.message};}
   return {kept:imgs.filter(i=>!done.includes(i)),err:null};}

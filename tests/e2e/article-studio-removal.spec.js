@@ -38,6 +38,7 @@ function seed() {
       // two rows on one path, as analyze-image leaves after a re-upload
       image('dupA', 'lce-images/library/dup.png', null, 'saved'),
       image('dupB', 'lce-images/library/dup.png', null, 'saved'),
+      image('spaced', 'lce-images/library/with space+plus?.png', null, 'saved'),
     ],
   };
 }
@@ -60,7 +61,7 @@ function filterRows(url, rows) {
 
 // removes(path): whether the Storage DELETE may take that file (false models a file RLS hides).
 // Files are state: a removed file is gone for good, and HEAD on its public URL then answers 400.
-async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false } = {}) {
+async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false, head = null } = {}) {
   const db = seed();
   db.files = new Set(db.images.map((i) => i.storage_path).filter(Boolean));
   const calls = { storage: [], deletes: [], logs: [], heads: [] };
@@ -94,6 +95,8 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
     const path = decodeURIComponent(new URL(req.url()).pathname.split('/storage/v1/object/public/project-assets/')[1]);
     calls.heads.push(path);
+    if (head === 'abort') return r.abort('failed');
+    if (head) return r.fulfill({ status: head, headers: CORS, body: '' });
     // storage-api answers 400 {"statusCode":"404"} for a missing public object
     return db.files.has(path)
       ? r.fulfill({ status: 200, headers: CORS, contentType: 'image/png', body: '' })
@@ -284,6 +287,32 @@ test.describe('@sb631 Article Studio removals', () => {
     expect(calls.storage).toEqual([]);
     expect(calls.deletes).toEqual([]);
     expect(calls.logs).toEqual([]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // Re-verify, 2026-10-24: only 400/404 mean gone. A 500 or a failed HEAD is unknown and keeps the
+  // row; a path with a space, + or ? must be encoded or the check would look at the wrong object.
+  test('TC-SB631-08a an unknown existence answer keeps the row', async ({ page }) => {
+    for (const head of [500, 'abort']) {
+      const ctx = await page.context().browser().newContext({ serviceWorkers: 'block' });
+      const p = await ctx.newPage();
+      const { calls, db } = await openStudio(p, { removes: () => false, head });
+      db.files.delete('lce-images/library/saved-1.png');
+      await deleteLibraryImage(p, 'img lib1');
+      await expect(toast(p)).toHaveText('File not removed — image kept');
+      expect(calls.heads).toEqual(['lce-images/library/saved-1.png']);
+      expect(calls.deletes).toEqual([]);
+      await ctx.close();
+    }
+  });
+
+  test('TC-SB631-08b the existence check encodes the path', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { removes: () => false });
+    db.files.delete('lce-images/library/with space+plus?.png');
+    await deleteLibraryImage(page, 'img spaced');
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.heads).toEqual(['lce-images/library/with space+plus?.png']);
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['spaced'] }]);
     expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
   });
 });
