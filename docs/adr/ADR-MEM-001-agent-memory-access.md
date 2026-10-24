@@ -23,7 +23,7 @@ An agent's memories are written in whatever project the agent was working in. So
 |---|----------|----------|
 | D1 | Who reads an agent's memory | Every user `can_access_agent(agent_id, uid)` says can use the agent, whatever project the memory was written in. |
 | D2 | Private memories | `scope = 'private'` stays owner-only, even with an `agent_id`. |
-| D3 | Writes | Unchanged. Reading through an agent gives no update, insert or removal right. |
+| D3 | Writes | Reading through an agent gives no write right. Tagging a memory with an agent needs ownership of the agent or a write role on a project it is linked to (§3a). |
 | D4 | Shape | One extra disjunct on `users_select_own`, not a second permissive policy. |
 | D5 | Recall | `match_memories(p_agent)` returns the agent's rows plus global ones. |
 
@@ -64,6 +64,17 @@ The independent verifier found that the read path could be obtained by writing. 
 | Planting a memory | Any user could tag a memory with another user's agent, so the agent's users would read it. | `agent_id` must be null, an agent the writer owns, or one the writer can use. This applies to both insert and update. |
 
 TC-SB581-05 covers both, plus a positive control showing the owner can still link and tag.
+
+The re-verification found that "an agent the writer can use" still let a project *viewer* write into the agent's recall. Migration `20261024032111_sb581_agent_memory_write_role.sql` raises the bar for tagging. The writer must:
+
+- own the agent; or
+- be an owner or editor of a project the agent is linked to (by role, or through `projects.user_id`).
+
+This is the same bar as writing into that project.
+
+The accepted cost: an editor cannot edit a memory in their project when it carries an agent they could not tag with, because a `WITH CHECK` cannot see the old `agent_id`. On 2026-10-23 that affected 0 of 31 (editor, agent memory) pairs.
+
+TC-SB581-05 now also checks that a viewer cannot tag and an editor can.
 
 ## 4. Exposure
 

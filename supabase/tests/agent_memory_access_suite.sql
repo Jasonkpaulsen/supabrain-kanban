@@ -21,7 +21,7 @@ declare
   u constant uuid := '0dd94a9f-1890-48b0-9e4f-a4bbfff949f0';
   s constant uuid := gen_random_uuid();
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  st2 text; st3 text; st4 text;
+  st2 text; st3 text; st4 text; st5 text; st6 text;
   p uuid; q uuid; rr uuid; a uuid; b uuid; ma uuid; map uuid; mb uuid; mg uuid;
   emb extensions.vector := ('[' || array_to_string(array_fill(0.01::float8, array[1536]), ',') || ']')::extensions.vector;
   sel text; old_inner_md5 constant text := '0d293905300c3c0b5f0f012d71b1cd33';
@@ -62,7 +62,7 @@ begin
   r := r || jsonb_build_object('TC-SB581-01.owner_sees_all', case when n = 4 then 'pass' else 'FAIL: ' || n || ' of 4' end);
 
   -- TC-SB581-02: the old expression is kept verbatim; write rules as pinned (the hashes are the
-  -- 20261023193934 agent_id checks); U still cannot write.
+  -- 20261024032111 agent_id checks); U still cannot write.
   select pg_get_expr(polqual, polrelid) into sel from pg_policy where polrelid = 'public.memories'::regclass and polname = 'users_select_own';
   r := r || jsonb_build_object('TC-SB581-02.old_expression_kept',
          case when md5(substring(sel from 2 for strpos(sel, ' OR ((agent_id IS NOT NULL)') - 2)) = old_inner_md5
@@ -70,8 +70,8 @@ begin
               then 'pass' else 'FAIL: ' || left(sel, 80) end);
   select string_agg(polname, ', ') into bad from (values
       ('Service role full access', 'fe2e7aa3a94b94b876d7713f1517686d'), ('oauth_client_deny', '35c27e4104835e0eb15f1858a47ebab9'),
-      ('users_delete_own', 'a1fc7aa105a1b503f03297d4c928519f'), ('users_insert_own', '410bf5f8773b6324dac4f692f89f31a9'),
-      ('users_update_own', '1f29739ae91aac5e4e4a0b79e2948df9')) v(polname, h)
+      ('users_delete_own', 'a1fc7aa105a1b503f03297d4c928519f'), ('users_insert_own', '43a8f1070d87d01d86be3969b9953568'),
+      ('users_update_own', '685bb27d688e0009138dca478e30d531')) v(polname, h)
    where not exists (select 1 from pg_policy pp where pp.polrelid = 'public.memories'::regclass and pp.polname = v.polname
                        and md5(coalesce(pg_get_expr(pp.polqual, pp.polrelid), '') || '|' || coalesce(pg_get_expr(pp.polwithcheck, pp.polrelid), '')) = v.h);
   r := r || jsonb_build_object('TC-SB581-02.write_policies_unchanged',
@@ -126,6 +126,21 @@ begin
   reset role;
   r := r || jsonb_build_object('TC-SB581-05.no_link_hijack', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
   r := r || jsonb_build_object('TC-SB581-05.no_memory_planting', case when st2 = '42501' then 'pass' else 'FAIL: ' || st2 end);
+  -- Re-verify (2026-10-23): using an agent is not enough to write into its recall. U, a viewer
+  -- of P where A is linked, cannot tag a memory with A; once X is an editor of P, X can.
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.memories (project_id, type, content, user_id, agent_id, scope) values (null, 'insight', 'qa-sb581 viewer-tag', u, a, 'project'); st5 := 'inserted';
+  exception when others then st5 := sqlstate; end;
+  reset role;
+  insert into public.project_members (project_id, user_id, role) values (p, x, 'editor');
+  perform set_config('request.jwt.claims', json_build_object('sub', x, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.memories (project_id, type, content, user_id, agent_id, scope) values (rr, 'insight', 'qa-sb581 editor-tag', x, a, 'project'); st6 := 'inserted';
+  exception when others then st6 := sqlstate; end;
+  reset role;
+  r := r || jsonb_build_object('TC-SB581-05.viewer_cannot_tag', case when st5 = '42501' then 'pass' else 'FAIL: ' || st5 end);
+  r := r || jsonb_build_object('TC-SB581-05.editor_can_tag', case when st6 = 'inserted' then 'pass' else 'FAIL: ' || st6 end);
   r := r || jsonb_build_object('TC-SB581-05.owner_still_writes', case when st3 = 'inserted' and st4 = 'inserted' then 'pass' else 'FAIL: link ' || st3 || ', memory ' || st4 end);
 
   -- TC-SB581-04: over the real rows, every row the agent path adds is non-private, carries an
