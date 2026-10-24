@@ -61,3 +61,19 @@ test("image_assets paths stay service-role only", () => {
     .filter((x) => /trg_image_asset_path_service_only|enforce_image_asset_path_service_only/i.test(code(x)));
   assert.deepEqual(later, [], "a later migration touches the image_assets path guard; re-run the SB-627 suite and update this test");
 });
+
+// The path guard trusts current_user, so a SECURITY DEFINER function that writes image_assets
+// would run as its owner and skip it. None exists (SB-627 verifier, 2026-10-24); keep it so.
+test("no later migration adds a SECURITY DEFINER function that writes image_assets", () => {
+  const FN = /create\s+(?:or\s+replace\s+)?function[\s\S]*?\$(\w*)\$[\s\S]*?\$\1\$/gi;
+  const offenders: string[] = [];
+  for (const f of files.filter((x) => x.slice(0, 14) > "20261024172958")) {
+    for (const fn of code(f).match(FN) ?? []) {
+      const head = fn.split(/\$\w*\$/)[0];
+      if (/security\s+definer/i.test(head) && /\b(insert\s+into|update)\s+(public\.)?image_assets\b/i.test(fn)) {
+        offenders.push(`${f}: ${head.replace(/\s+/g, " ").slice(0, 90)}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], "a definer function writing image_assets skips trg_image_asset_path_service_only");
+});
