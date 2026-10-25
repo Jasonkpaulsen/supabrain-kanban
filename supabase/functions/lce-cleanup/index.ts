@@ -4,6 +4,11 @@
 // stale done/failed image_requests, plus the corresponding objects in the
 // project-assets bucket. Invoked daily by pg_cron job `lce-daily-cleanup`.
 //
+// SB-635 / SB-633 (2026-10-25): the decisions live in cleanup.ts, unit-tested in
+// cleanup.test.ts; this file only does the I/O. A row goes only when its file is
+// gone, only what was deleted is logged, and saved/library images survive the
+// article they came from.
+//
 // SB-493 (2026-09-21): the expected token used to be a literal in this file,
 // and the SAME literal sat in plaintext in cron.job.command for job 1 — so it
 // was in the database, and therefore in every backup, readable by anyone who
@@ -25,14 +30,18 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { runCleanup, type Io, type Row } from "./cleanup.ts";
 
 const BUCKET = "project-assets";
 const GRACE_DEFAULT = 30;
 const GRACE_MIN = 1;    // 0 or less would set the cutoff at or after "now"
 const GRACE_MAX = 365;
 
+const IMAGE_COLS = "id,storage_path,user_id,status,article_id";
+
 Deno.serve(async (req: Request) => {
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const sb = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   // SB-493: validate against the Vault-held token without ever receiving its value.
   {
@@ -49,35 +58,33 @@ Deno.serve(async (req: Request) => {
     if (Number.isFinite(n)) graceDays = Math.min(GRACE_MAX, Math.max(GRACE_MIN, Math.trunc(n)));
   } catch (_) { /* empty body ok */ }
 
-  const cutoff = new Date(Date.now() - graceDays * 86400000).toISOString();
-  const log: any[] = [];
-  const summary = { articles: 0, images: 0, requests: 0, storage_removed: 0, grace_days: graceDays };
+  // deno-lint-ignore no-explicit-any
+  const rows = (r: { data: any; error: any }): Row[] => { if (r.error) throw new Error(r.error.message); return (r.data ?? []) as Row[]; };
+  const ids = (r: { data: Row[] | null; error: { message: string } | null }): string[] => rows(r).map((x) => x.id);
 
-  // 1) expired trashed articles
-  const { data: arts } = await sb.from("articles").select("id,title,user_id").eq("status", "trashed").lt("trashed_at", cutoff);
-  const artIds = (arts ?? []).map((a: any) => a.id);
+  const io: Io = {
+    expiredArticles: async (cutoff) => rows(await sb.from("articles").select("id,title,user_id").eq("status", "trashed").lt("trashed_at", cutoff)),
+    articleImages: async (artIds) => rows(await sb.from("image_assets").select(IMAGE_COLS).in("article_id", artIds)),
+    expiredRejected: async (cutoff) => rows(await sb.from("image_assets").select(IMAGE_COLS).eq("status", "rejected").lt("updated_at", cutoff)),
+    staleRequests: async (cutoff) => rows(await sb.from("image_requests").select("id,user_id").in("status", ["done", "failed"]).lt("updated_at", cutoff)),
+    removeFiles: async (paths) => {
+      const { data, error } = await sb.storage.from(BUCKET).remove(paths);
+      if (error) throw new Error(error.message);
+      return (data ?? []).map((o: { name: string }) => o.name);
+    },
+    fileGone: async (path) => {
+      const r = await fetch(`${url}/storage/v1/object/public/${BUCKET}/${path.split("/").map(encodeURIComponent).join("/")}`, { method: "HEAD" });
+      return r.status === 400 || r.status === 404;
+    },
+    deleteImages: async (xs) => ids(await sb.from("image_assets").delete().in("id", xs).select("id")),
+    deleteArticles: async (xs) => ids(await sb.from("articles").delete().in("id", xs).select("id")),
+    deleteRequests: async (xs) => ids(await sb.from("image_requests").delete().in("id", xs).select("id")),
+    insertLog: async (log) => { const { error } = await sb.from("lce_deletion_log").insert(log); if (error) throw new Error(error.message); },
+  };
 
-  // images to remove: those belonging to expiring articles + expired rejected images anywhere
-  const paths: string[] = [];
-  const imgIds: string[] = [];
-  if (artIds.length) {
-    const { data: imgs } = await sb.from("image_assets").select("id,storage_path,user_id").in("article_id", artIds);
-    for (const im of imgs ?? []) { imgIds.push(im.id); if (im.storage_path) paths.push(im.storage_path); log.push({ user_id: im.user_id, entity_type: "image", entity_id: im.id, storage_path: im.storage_path, reason: "auto_purge", grace_days: graceDays }); }
-  }
-  const { data: rej } = await sb.from("image_assets").select("id,storage_path,user_id").eq("status", "rejected").lt("updated_at", cutoff);
-  for (const im of rej ?? []) { imgIds.push(im.id); if (im.storage_path) paths.push(im.storage_path); log.push({ user_id: im.user_id, entity_type: "image", entity_id: im.id, storage_path: im.storage_path, reason: "auto_purge", grace_days: graceDays }); }
-
-  if (paths.length) { const { error } = await sb.storage.from(BUCKET).remove(paths); if (!error) summary.storage_removed = paths.length; }
-  if (imgIds.length) { await sb.from("image_assets").delete().in("id", imgIds); summary.images = imgIds.length; }
-  for (const a of arts ?? []) log.push({ user_id: a.user_id, entity_type: "article", entity_id: a.id, title: a.title, reason: "auto_purge", grace_days: graceDays });
-  if (artIds.length) { await sb.from("articles").delete().in("id", artIds); summary.articles = artIds.length; }
-
-  // 2) stale done/failed image_requests (>7d, independent of graceDays)
-  const reqCut = new Date(Date.now() - 7 * 86400000).toISOString();
-  const { data: reqs } = await sb.from("image_requests").select("id").in("status", ["done", "failed"]).lt("updated_at", reqCut);
-  const reqIds = (reqs ?? []).map((r: any) => r.id);
-  if (reqIds.length) { await sb.from("image_requests").delete().in("id", reqIds); summary.requests = reqIds.length; }
-
-  if (log.length) await sb.from("lce_deletion_log").insert(log);
-  return new Response(JSON.stringify({ ok: true, ...summary, at: new Date().toISOString() }), { headers: { "content-type": "application/json" } });
+  const summary = await runCleanup(io, { graceDays, now: Date.now() });
+  return new Response(JSON.stringify({ ...summary, at: new Date().toISOString() }), {
+    status: summary.ok ? 200 : 500,
+    headers: { "content-type": "application/json" },
+  });
 });
