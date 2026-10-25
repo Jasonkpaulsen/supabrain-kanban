@@ -1,0 +1,429 @@
+// SB-631 (TC-SB631-01..05): Article Studio removes an image row only when its file went.
+//
+// deleteStorage used to check r.ok alone. The Storage API answers 200 with an empty list when
+// nothing matched, so a removal that removed nothing looked done, and destroy, emptyTrash and
+// deleteImage then removed the image_assets rows anyway, leaving the files in project-assets
+// with nothing pointing at them (and, after SB-627, no way for the user to remove them).
+//
+// Stubbed backend, as in cards.spec.js: auth and the vendored supabase-js come from stub.js's
+// conventions; REST and Storage are a small stateful stub defined here. Each test sets what the
+// Storage DELETE reports as removed, then asserts the writes the page sent.
+const { test, expect } = require('@playwright/test');
+const { SESSION } = require('./stub');
+
+const SUPABASE_UMD = require.resolve('@supabase/supabase-js/dist/umd/supabase.js');
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': '*',
+  'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+};
+
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+const A1 = '11111111-1111-4111-8111-111111111111';
+const A2 = '22222222-2222-4222-8222-222222222222';
+const now = new Date().toISOString();
+const article = (id, title) => ({ id, title, status: 'trashed', updated_at: now, created_at: now, body_md: '', feedback_history: [] });
+const image = (id, path, articleId, status = 'candidate') =>
+  ({ id, storage_path: path, storage_bucket: 'project-assets', article_id: articleId, status, description: `img ${id}`, public_url: `https://x.test/${path}`, sort_order: 0, updated_at: now });
+
+function seed() {
+  return {
+    articles: [article(A1, 'Trashed one'), article(A2, 'Trashed two')],
+    images: [
+      image('i1', `lce-images/${A1}/candidate-1.png`, A1),
+      image('i2', `lce-images/${A1}/candidate-2.png`, A1),
+      image('i3', `lce-images/${A2}/candidate-1.png`, A2),
+      image('lib1', 'lce-images/library/saved-1.png', null, 'saved'),
+      image('nofile', null, null, 'saved'),
+      // SB-633: images saved to the library from a trashed article stay when the article goes
+      image('sv', `lce-images/${A1}/saved.png`, A1, 'saved'),
+      image('lb', `lce-images/${A2}/library.png`, A2, 'library'),
+      // two rows on one path, as analyze-image leaves after a re-upload
+      image('dupA', 'lce-images/library/dup.png', null, 'saved'),
+      image('dupB', 'lce-images/library/dup.png', null, 'saved'),
+      image('spaced', 'lce-images/library/with space+plus?.png', null, 'saved'),
+    ],
+  };
+}
+
+// Minimal PostgREST filters used by the page: col=eq.v, col=in.(a,b).
+function filterRows(url, rows) {
+  const q = new URL(url).searchParams;
+  return rows.filter((r) => {
+    for (const [k, v] of q) {
+      if (['select', 'order', 'limit', 'offset'].includes(k)) continue;
+      const m = /^(not\.)?(eq|in)\.(.*)$/.exec(v);
+      if (!m) continue;
+      const val = r[k] == null ? 'null' : String(r[k]);
+      const hit = m[2] === 'eq' ? val === m[3]
+        : m[3].replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(val);
+      if (m[1] ? hit : !hit) return false;
+    }
+    return true;
+  });
+}
+
+// removes(path): whether the Storage DELETE may take that file (false models a file RLS hides).
+// Files are state: a removed file is gone for good, and HEAD on its public URL then answers 400.
+async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false, head = null, failLog = false, failArticleDelete = false, failSharedLookup = false } = {}) {
+  const db = seed();
+  db.files = new Set(db.images.map((i) => i.storage_path).filter(Boolean));
+  const calls = { storage: [], deletes: [], logs: [], heads: [] };
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('dialog', (d) => d.accept());
+
+  await page.route('**/cdn.jsdelivr.net/**', (r) => r.fulfill({ status: 200, contentType: 'application/javascript', path: SUPABASE_UMD }));
+  // Thumbnails point at a fixture host; serve a 1x1 PNG so they load instead of logging errors.
+  await page.route('https://x.test/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+  await page.route('**/auth/v1/**', (r) => {
+    const u = r.request().url();
+    const body = u.includes('/token') ? SESSION : u.includes('/user') ? SESSION.user : {};
+    return r.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(body) });
+  });
+  await page.route('**/storage/v1/object/project-assets', async (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    const asked = JSON.parse(req.postData() || '{}').prefixes || [];
+    calls.storage.push(asked);
+    if (storageAbort) return r.abort('failed');
+    if (storageStatus !== 200) return r.fulfill({ status: storageStatus, headers: CORS, contentType: 'application/json', body: '{"message":"boom"}' });
+    const gone = [...new Set(asked)].filter((p) => db.files.has(p) && removes(p));
+    gone.forEach((p) => db.files.delete(p));
+    return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json',
+      body: JSON.stringify(gone.map((name) => ({ name, bucket_id: 'project-assets' }))) });
+  });
+  await page.route('**/storage/v1/object/public/project-assets/**', (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    const path = decodeURIComponent(new URL(req.url()).pathname.split('/storage/v1/object/public/project-assets/')[1]);
+    calls.heads.push(path);
+    if (head === 'abort') return r.abort('failed');
+    if (head) return r.fulfill({ status: head, headers: CORS, body: '' });
+    // storage-api answers 400 {"statusCode":"404"} for a missing public object
+    return db.files.has(path)
+      ? r.fulfill({ status: 200, headers: CORS, contentType: 'image/png', body: '' })
+      : r.fulfill({ status: 400, headers: CORS, contentType: 'application/json', body: '{"statusCode":"404","error":"not_found"}' });
+  });
+  await page.route('**/rest/v1/**', async (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    const url = req.url();
+    const table = new URL(url).pathname.split('/').pop();
+    const rows = table === 'articles' ? db.articles : table === 'image_assets' ? db.images : [];
+    if (req.method() === 'GET') {
+      if (failSharedLookup && table === 'image_assets' && /storage_path=/.test(url)) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"shared lookup down"}' });
+      }
+      if (failImageGet && table === 'image_assets' && /article_id=/.test(url)) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"lookup down"}' });
+      }
+      const out = filterRows(url, rows);
+      const single = (req.headers()['accept'] || '').includes('vnd.pgrst.object');
+      return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(single ? out[0] || null : out) });
+    }
+    if (req.method() === 'DELETE') {
+      if (table === 'image_assets' && failImageDeletes > 0) {
+        failImageDeletes -= 1;
+        calls.deletes.push({ table, ids: [], failed: true });
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"row delete down"}' });
+      }
+      if (table === 'articles' && failArticleDelete) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"article delete down"}' });
+      }
+      const hit = filterRows(url, rows);
+      calls.deletes.push({ table, ids: hit.map((x) => x.id) });
+      if (table === 'articles') db.articles = db.articles.filter((x) => !hit.includes(x));
+      if (table === 'image_assets') db.images = db.images.filter((x) => !hit.includes(x));
+      return r.fulfill({ status: 204, headers: CORS, body: '' });
+    }
+    if (req.method() === 'POST' && table === 'lce_deletion_log') {
+      if (failLog) return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"log down"}' });
+      calls.logs.push(...JSON.parse(req.postData() || '[]'));
+      return r.fulfill({ status: 201, headers: CORS, body: '' });
+    }
+    return r.fulfill({ status: 405, headers: CORS, contentType: 'application/json', body: '{"message":"not stubbed"}' });
+  });
+
+  await page.goto('/article-studio/index.html');
+  await page.fill('#email', 'qa-fixture@supabrain.test');
+  await page.fill('#password', 'stubbed');
+  await page.click('button:has-text("Enter Studio")');
+  await expect(page.locator('#app')).toBeVisible();
+  return { calls, errors, db };
+}
+
+const toast = (page) => page.locator('#toast');
+const deletesOf = (calls, table) => calls.deletes.filter((d) => d.table === table);
+
+async function deleteLibraryImage(page, description) {
+  await page.click('#n-lib');
+  const card = page.locator('#libGrid .card', { hasText: description });
+  await expect(card).toBeVisible();
+  await card.locator('button:has-text("Delete")').click();
+}
+
+async function openTrashedArticle(page, title) {
+  await page.click('#n-board');
+  await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+  await page.locator('.card', { hasText: title }).first().click();
+  await expect(page.locator('#sheet')).toHaveClass(/open/);
+}
+
+test.describe('@sb631 Article Studio removals', () => {
+  // sw.js would fetch thumbnails itself, outside page.route; the worker is not under test.
+  test.use({ serviceWorkers: 'block' });
+
+  test('TC-SB631-01 library image: a removal that removed nothing keeps the row', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { removes: () => false });
+    await deleteLibraryImage(page, 'img lib1');
+    await expect(toast(page)).toHaveText('File not removed — image kept');
+    expect(calls.storage).toEqual([['lce-images/library/saved-1.png']]);
+    expect(calls.deletes).toEqual([]);
+    expect(calls.logs).toEqual([]);
+    await expect(page.locator('#libGrid .card', { hasText: 'img lib1' })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('TC-SB631-02 library image: a real removal removes the row and logs it', async ({ page }) => {
+    const { calls, errors } = await openStudio(page);
+    await deleteLibraryImage(page, 'img lib1');
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['lib1'] }]);
+    expect(calls.logs).toEqual([expect.objectContaining({ entity_type: 'image', entity_id: 'lib1', storage_path: 'lce-images/library/saved-1.png', reason: 'manual_delete' })]);
+    await expect(page.locator('#libGrid .card', { hasText: 'img lib1' })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('TC-SB631-03 article in Trash: the article and its unremoved image are kept', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { removes: (p) => p.endsWith('candidate-1.png') });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('1 file(s) not removed — article kept in Trash');
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['i1'] }]);
+    expect(deletesOf(calls, 'articles')).toEqual([]);
+    // SB-635: the image row that did go is logged; the kept article is not
+    expect(calls.logs).toEqual([expect.objectContaining({ entity_type: 'image', entity_id: 'i1', reason: 'manual_delete' })]);
+    expect(db.articles.map((a) => a.id)).toContain(A1);
+    expect(db.images.map((i) => i.id)).toContain('i2');
+    expect(errors).toEqual([]);
+  });
+
+  test('TC-SB631-04 Empty Trash: only articles whose files all went are removed', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { removes: (p) => !p.endsWith('candidate-2.png') });
+    await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+    await page.locator('button:has-text("Empty Trash")').click();
+    await expect(toast(page)).toHaveText('Purged 1, kept 1 — 1 file(s) not removed');
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['i1', 'i3'] }]);
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A2] }]);
+    expect(calls.logs).toEqual([
+      expect.objectContaining({ entity_type: 'image', entity_id: 'i1', reason: 'manual_empty_trash' }),
+      expect.objectContaining({ entity_type: 'image', entity_id: 'i3', reason: 'manual_empty_trash' }),
+      expect.objectContaining({ entity_type: 'article', entity_id: A2, reason: 'manual_empty_trash' }),
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('TC-SB631-05a a Storage error or network failure removes nothing', async ({ page }) => {
+    for (const opts of [{ storageStatus: 500 }, { storageAbort: true }]) {
+      const ctx = await page.context().browser().newContext();
+      const p = await ctx.newPage();
+      const { calls } = await openStudio(p, opts);
+      await deleteLibraryImage(p, 'img lib1');
+      await expect(toast(p)).toHaveText('File not removed — image kept');
+      expect(calls.storage.length).toBe(1);
+      expect(calls.deletes).toEqual([]);
+      expect(calls.logs).toEqual([]);
+      await ctx.close();
+    }
+  });
+
+  test('TC-SB631-05b an image with no file is removed without a Storage call', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { removes: () => false });
+    await deleteLibraryImage(page, 'img nofile');
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage).toEqual([]);
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['nofile'] }]);
+    expect(errors).toEqual([]);
+  });
+
+  // The browser logs the injected 503s and the existence check's 400 ("already gone") as failed
+  // resource loads; nothing else may be logged.
+  const EXPECTED_HTTP = /status of (400|503)/;
+
+  // Verifier, 2026-10-24: an empty removal answer also means "already gone". Without the HEAD
+  // check, a row whose file went but whose row delete failed could never be removed.
+  test('TC-SB631-06a library image: a retry after a failed row delete removes the row', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { failImageDeletes: 1 });
+    await deleteLibraryImage(page, 'img lib1');
+    await expect(toast(page)).toHaveText(/^Image not removed: /);
+    expect(db.files.has('lce-images/library/saved-1.png')).toBe(false);
+    expect(calls.logs).toEqual([]);
+    await page.locator('#libGrid .card', { hasText: 'img lib1' }).locator('button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.heads).toContain('lce-images/library/saved-1.png');
+    expect(deletesOf(calls, 'image_assets').filter((d) => !d.failed)).toEqual([{ table: 'image_assets', ids: ['lib1'] }]);
+    expect(calls.logs).toEqual([expect.objectContaining({ entity_id: 'lib1', reason: 'manual_delete' })]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-06b article in Trash: a retry after a failed row delete removes the article', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { failImageDeletes: 1 });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText(/^Images not removed: /);
+    expect(deletesOf(calls, 'articles')).toEqual([]);
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(deletesOf(calls, 'image_assets').filter((d) => !d.failed)).toEqual([{ table: 'image_assets', ids: ['i1', 'i2'] }]);
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+    expect(db.articles.map((a) => a.id)).not.toContain(A1);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-06c two rows on one path: removing the second after the first still works', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await deleteLibraryImage(page, 'img dupA');
+    await expect(toast(page)).toHaveText('Deleted');
+    await expect(page.locator('#libGrid .card', { hasText: 'img dupA' })).toHaveCount(0);
+    await page.locator('#libGrid .card', { hasText: 'img dupB' }).locator('button:has-text("Delete")').click();
+    // the toast still says Deleted from the first removal, so wait on the card instead
+    await expect(page.locator('#libGrid .card', { hasText: 'img dupB' })).toHaveCount(0);
+    // SB-633: the first removal leaves the file (dupB still uses it); the second takes it
+    expect(calls.storage).toEqual([['lce-images/library/dup.png']]);
+    expect(db.files.has('lce-images/library/dup.png')).toBe(false);
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['dupA'] }, { table: 'image_assets', ids: ['dupB'] }]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB631-07 a failed image lookup stops the removal', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { failImageGet: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('lookup down');
+    expect(calls.storage).toEqual([]);
+    expect(calls.deletes).toEqual([]);
+    expect(calls.logs).toEqual([]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // Re-verify, 2026-10-24: only 400/404 mean gone. A 500 or a failed HEAD is unknown and keeps the
+  // row; a path with a space, + or ? must be encoded or the check would look at the wrong object.
+  test('TC-SB631-08a an unknown existence answer keeps the row', async ({ page }) => {
+    for (const head of [500, 'abort']) {
+      const ctx = await page.context().browser().newContext({ serviceWorkers: 'block' });
+      const p = await ctx.newPage();
+      const { calls, db } = await openStudio(p, { removes: () => false, head });
+      db.files.delete('lce-images/library/saved-1.png');
+      await deleteLibraryImage(p, 'img lib1');
+      await expect(toast(p)).toHaveText('File not removed — image kept');
+      expect(calls.heads).toEqual(['lce-images/library/saved-1.png']);
+      expect(calls.deletes).toEqual([]);
+      await ctx.close();
+    }
+  });
+
+  test('TC-SB631-08b the existence check encodes the path', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page, { removes: () => false });
+    db.files.delete('lce-images/library/with space+plus?.png');
+    await deleteLibraryImage(page, 'img spaced');
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.heads).toEqual(['lce-images/library/with space+plus?.png']);
+    expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['spaced'] }]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // SB-633: saved and library images are not part of an article's removal.
+  test('TC-SB633-02a deleting an article leaves its saved image alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A1}/saved.png`);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids)).not.toContain('sv');
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+    expect(db.images.map((i) => i.id)).toContain('sv');
+    expect(db.files.has(`lce-images/${A1}/saved.png`)).toBe(true);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB633-02b Empty Trash leaves saved and library images alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+    await page.locator('button:has-text("Empty Trash")').click();
+    await expect(toast(page)).toHaveText('Purged 2');
+    expect(calls.storage.flat().filter((p) => /saved\.png|library\.png/.test(p))).toEqual([]);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids).sort()).toEqual(['i1', 'i2', 'i3']);
+    expect(db.images.map((i) => i.id)).toEqual(expect.arrayContaining(['sv', 'lb']));
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // SB-635: manual removals log their image rows, and a failed log write is reported.
+  test('TC-SB635-04a deleting an article logs its image rows and the article', async ({ page }) => {
+    const { calls, errors } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.logs.map((l) => `${l.entity_type}:${l.entity_id}:${l.reason}`).sort()).toEqual(
+      [`article:${A1}:manual_delete`, 'image:i1:manual_delete', 'image:i2:manual_delete']);
+    expect(calls.logs.find((l) => l.entity_id === 'i1').storage_path).toBe(`lce-images/${A1}/candidate-1.png`);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB635-04b a failed purge-log write is reported, not hidden', async ({ page }) => {
+    const { calls } = await openStudio(page, { failLog: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted — purge log not written');
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+  });
+
+  // Verifier, 2026-10-25: a file shared with a surviving row stays.
+  test('TC-SB633-02c a file shared with a library image is not removed with the article', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    db.images.push(image('libdup', `lce-images/${A1}/candidate-1.png`, null, 'saved'));
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A1}/candidate-1.png`);
+    expect(db.files.has(`lce-images/${A1}/candidate-1.png`)).toBe(true);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids).sort()).toEqual(['i1', 'i2']);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB633-02d deleting an article leaves its library image alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed two');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A2}/library.png`);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids)).toEqual(['i3']);
+    expect(db.images.map((i) => i.id)).toContain('lb');
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB635-04c a library delete with a failed purge log says so', async ({ page }) => {
+    await openStudio(page, { failLog: true }).then(() => deleteLibraryImage(page, 'img lib1'));
+    await expect(toast(page)).toHaveText('Deleted — purge log not written');
+  });
+
+  test('TC-SB635-04d image rows removed before a failed article delete are still logged', async ({ page }) => {
+    const { calls } = await openStudio(page, { failArticleDelete: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('article delete down');
+    expect(calls.logs.map((l) => `${l.entity_type}:${l.entity_id}`).sort()).toEqual(['image:i1', 'image:i2']);
+  });
+
+  test('TC-SB633-02e a failed shared-file lookup removes nothing', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { failSharedLookup: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Images not removed: shared lookup down');
+    expect(calls.storage).toEqual([]);
+    expect(calls.deletes).toEqual([]);
+    expect(calls.logs).toEqual([]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+});
