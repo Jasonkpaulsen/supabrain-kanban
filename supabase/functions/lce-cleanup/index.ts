@@ -67,11 +67,16 @@ Deno.serve(async (req: Request) => {
     articleImages: async (artIds) => rows(await sb.from("image_assets").select(IMAGE_COLS).in("article_id", artIds)),
     expiredRejected: async (cutoff) => rows(await sb.from("image_assets").select(IMAGE_COLS).eq("status", "rejected").lt("updated_at", cutoff)),
     staleRequests: async (cutoff) => rows(await sb.from("image_requests").select("id,user_id").in("status", ["done", "failed"]).lt("updated_at", cutoff)),
+    // Selects by path in chunks and drops the excluded ids here, so the URL stays short.
     pathsInUse: async (paths, exclude) => {
-      const q = sb.from("image_assets").select("storage_path").eq("storage_bucket", BUCKET).in("storage_path", paths);
-      const r = exclude.length ? await q.not("id", "in", `(${exclude.join(",")})`) : await q;
-      if (r.error) throw new Error(r.error.message);
-      return [...new Set((r.data ?? []).map((x: { storage_path: string }) => x.storage_path))];
+      const skip = new Set(exclude);
+      const used = new Set<string>();
+      for (let k = 0; k < paths.length; k += 50) {
+        const r = await sb.from("image_assets").select("id,storage_path").eq("storage_bucket", BUCKET).in("storage_path", paths.slice(k, k + 50));
+        if (r.error) throw new Error(r.error.message);
+        for (const x of (r.data ?? []) as { id: string; storage_path: string }[]) if (!skip.has(x.id)) used.add(x.storage_path);
+      }
+      return [...used];
     },
     removeFiles: async (paths) => {
       const { data, error } = await sb.storage.from(BUCKET).remove(paths);

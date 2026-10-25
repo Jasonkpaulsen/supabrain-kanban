@@ -223,6 +223,17 @@ test("rows outside project-assets are kept and block their article", async () =>
   assert.equal(s.articles_kept, 1);
 });
 
+test("a row in another bucket with the same path string as a purged file is not deleted", async () => {
+  const w = world();
+  // other-bucket copy of a1's candidate path, owned by an expiring article
+  w.images.push({ id: "ob", storage_path: "lce-images/a1/candidate-1.png", storage_bucket: "other-bucket", status: "candidate", article_id: "a1", user_id: "u" });
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.ok(!calls.deleted.images.flat().includes("ob"));
+  assert.ok(!calls.deleted.articles.flat().includes("a1"), "its article is blocked");
+  assert.ok(s.articles_kept >= 1);
+});
+
 test("counts: storage_removed is what remove() reported, ignoring paths not asked for; files_kept counts the unsure", async () => {
   const w = world({ extraRemoved: "lce-images/unrelated.png" });
   w.hidden.add("lce-images/x/rejected.png");
