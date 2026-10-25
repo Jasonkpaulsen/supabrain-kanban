@@ -248,7 +248,7 @@ function showApp(){document.getElementById('login').style.display='none';documen
 // SB-634 (re-verification): SESSION_GEN changes on every return to the login screen; a load that
 // started before it drops its result, so the previous user's data is never drawn again.
 let SESSION_GEN=0;
-function showLogin(msg){SESSION_GEN+=1;USER=null;ARTICLES=[];CURRENT=null;['sheet','newSheet'].forEach(i=>{const e=document.getElementById(i);if(e)e.classList.remove('open');});['sheetBody','sheetTitle','sheetActions','list','libGrid','agenda','purgedList','stats','recs','tabs'].forEach(i=>{const e=document.getElementById(i);if(e)e.innerHTML='';});setView('board');document.getElementById('password').value='';document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex';document.getElementById('loginErr').textContent=msg||'';}
+function showLogin(msg){SESSION_GEN+=1;USER=null;ARTICLES=[];CURRENT=null;FILTER='all';['sheet','newSheet'].forEach(i=>{const e=document.getElementById(i);if(e)e.classList.remove('open');});['sheetBody','sheetTitle','sheetActions','list','libGrid','agenda','purgedList','stats','recs','tabs'].forEach(i=>{const e=document.getElementById(i);if(e)e.innerHTML='';});setView('board');document.getElementById('password').value='';document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex';document.getElementById('loginErr').textContent=msg||'';}
 // SB-634 (verifier): a session that cannot be checked because the network is down is not ended.
 const appShown=()=>document.getElementById('app').style.display!=='none';
 sb.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT')showLogin('Signed out — sign in again');});
@@ -258,9 +258,9 @@ window.addEventListener('offline',()=>{document.getElementById('offline').style.
 checkSession();
 
 async function load(){const g=SESSION_GEN;
-  const {data:ses,error:se}=await sb.auth.getSession();if(g!==SESSION_GEN)return;if(se&&(!navigator.onLine||se.name==='AuthRetryableFetchError')){document.getElementById('offline').style.display='block';return;}if(!ses.session){showLogin('Session ended — sign in again');return;}document.getElementById('offline').style.display='none';
+  const {data:ses,error:se}=await sb.auth.getSession();if(g!==SESSION_GEN)return;if(se&&(!navigator.onLine||se.name==='AuthRetryableFetchError')){document.getElementById('offline').style.display='block';return;}if(!ses.session){showLogin('Session ended — sign in again');return;}
   const {data,error}=await sb.from('articles').select('*').order('updated_at',{ascending:false});if(g!==SESSION_GEN)return;
-  if(error){toast(error.message);return;}
+  if(error){toast(error.message);return;}document.getElementById('offline').style.display='none';
   ARTICLES=data||[];renderStats();renderRecs();renderTabs();renderList();
   if(VIEW==='cal')renderAgenda();if(VIEW==='lib')renderLibrary();if(VIEW==='purged')renderPurged();
 }
@@ -367,9 +367,14 @@ async function markPublished(id){const url=prompt('LinkedIn post URL (optional):
 async function emptyTrash(){const {data:arts,error:ae}=await sb.from('articles').select('id,title').eq('status','trashed');if(ae){toast(ae.message);return;}const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket,article_id').in('article_id',ids).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const held=new Set(kept.map(i=>i.article_id));const go=(arts||[]).filter(a=>!held.has(a.id));let rows=imageLog(done,'manual_empty_trash');let purged=[];if(go.length){const {data:gone,error}=await sb.from('articles').delete().in('id',go.map(a=>a.id)).select('id');if(error){await logPurge(rows);toast(error.message);return;}const ids=new Set((gone||[]).map(g=>g.id));purged=go.filter(a=>ids.has(a.id));rows=rows.concat(purged.map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));}const notGone=go.length-purged.length+held.size;const lg=await logPurge(rows);toast((notGone?`Purged ${purged.length}, kept ${notGone}`+(kept.length?` — ${kept.length} file(s) not removed`:''):`Purged ${purged.length}`)+(lg?'':' — purge log not written'));load();}
 
 /* images */
-async function loadArticleImages(articleId){
-  const z=document.getElementById('imgZone');if(!z)return;
+// SB-634 (verification of 040e3da): draws only into the open sheet of the same article, in the same
+// session; a header change or Save/Reject that finishes after another article was opened draws nothing.
+// Checked before the query (setHeader calls this after its own await) and again after it.
+const sheetIs=(articleId,z,g)=>g===SESSION_GEN&&z.isConnected&&CURRENT&&CURRENT.id===articleId;
+async function loadArticleImages(articleId){const g=SESSION_GEN;
+  const z=document.getElementById('imgZone');if(!z||!sheetIs(articleId,z,g))return;
   const {data,error}=await sb.from('image_assets').select('*').eq('article_id',articleId).in('status',['candidate','accepted']).order('sort_order');
+  if(!sheetIs(articleId,z,g))return;
   if(error){z.innerHTML='<div class="lbl">Header image</div><div class="muted">'+esc(error.message)+'</div>';return;}
   const imgs=data||[];const hero=imgs.find(i=>i.status==='accepted');const cands=imgs.filter(i=>i.status==='candidate');
   let html='<div class="lbl">Header image</div>';

@@ -223,6 +223,67 @@ test.describe('@sb634 @sb636 Article Studio writes', () => {
     await expect(page.locator('#offline')).toBeHidden();
   });
 
+  test('TC-SB634-03l a library or purged-list load still running at sign-out draws nothing', async ({ page }) => {
+    await openStudio(page);
+    let release;
+    const held = new Promise((res) => { release = res; });
+    await page.route('**/rest/v1/{image_assets,lce_deletion_log}?*', async (r) => {
+      if (r.request().method() !== 'GET') return r.fallback();
+      await held;
+      return r.fallback();
+    });
+    await page.click('#n-lib');
+    await page.click('#n-purged');
+    await page.locator('#signOut').click();
+    await expect(page.locator('#login')).toBeVisible();
+    release();
+    await page.waitForTimeout(500);
+    await expect(page.locator('#libGrid')).toBeEmpty();
+    await expect(page.locator('#purgedList')).toBeEmpty();
+  });
+
+  test('TC-SB634-03m signing in again starts on all articles, not the last filter', async ({ page }) => {
+    await openStudio(page);
+    await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+    await page.locator('#signOut').click();
+    await page.fill('#password', 'stubbed');
+    await page.click('button:has-text("Enter Studio")');
+    await expect(page.locator('#app')).toBeVisible();
+    expect(await page.evaluate(() => FILTER)).toBe('all');
+  });
+
+  test('TC-SB634-03n offline with a stored session keeps the banner when the load fails', async ({ page }) => {
+    await openStudio(page);
+    await page.route('**/rest/v1/articles?*', (r) => (r.request().method() === 'GET' ? r.abort('internetdisconnected') : r.fallback()));
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false }); window.dispatchEvent(new Event('offline')); });
+    await expect(page.locator('#offline')).toBeVisible();
+    await page.locator('button.ref:has-text("↻")').click();
+    await page.waitForTimeout(500);
+    await expect(page.locator('#offline')).toBeVisible();
+  });
+
+  test('TC-SB636-03c a header change that finishes after another article was opened leaves that sheet alone', async ({ page }) => {
+    await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await expect(page.locator('#imgZone')).toContainText('img i2');
+    let release;
+    const held = new Promise((res) => { release = res; });
+    await page.route('**/rest/v1/rpc/set_article_header', async (r) => {
+      if (r.request().method() !== 'POST') return r.fallback();
+      await held;
+      return r.fallback();
+    });
+    await page.locator('#imgZone .imgcard', { hasText: 'img i1' }).locator('button:has-text("Accept")').click();
+    await page.evaluate(() => closeSheet());
+    await openTrashedArticle(page, 'Trashed two');
+    await expect(page.locator('#imgZone')).toContainText('img i3');
+    release();
+    await page.waitForTimeout(700);
+    await expect(page.locator('#imgZone')).toContainText('img i3');
+    await expect(page.locator('#imgZone')).not.toContainText('img i2');
+    await expect(page.locator('#imgZone .hero')).toHaveCount(0);
+  });
+
   test('TC-SB636-02a Accept goes through set_article_header once', async ({ page }) => {
     const { calls, db, errors } = await openStudio(page);
     await openTrashedArticle(page, 'Trashed one');
