@@ -9,11 +9,14 @@
 //
 // SB-633: saved and library images are not part of an article's removal set. article_id is
 // ON DELETE SET NULL, so deleting the article detaches them and they stay in the library.
+// storage_path is not unique, so a file another surviving row still uses is never removed; the
+// purged row just lets go of it. Only project-assets objects are handled; other buckets are kept.
 
 export type Row = {
   id: string;
   user_id?: string | null;
   storage_path?: string | null;
+  storage_bucket?: string | null;
   status?: string | null;
   article_id?: string | null;
   title?: string | null;
@@ -34,6 +37,8 @@ export interface Io {
   articleImages(articleIds: string[]): Promise<Row[]>;
   expiredRejected(cutoff: string): Promise<Row[]>;
   staleRequests(cutoff: string): Promise<Row[]>;
+  /** Which of these paths are still used by image_assets rows outside excludeIds. */
+  pathsInUse(paths: string[], excludeIds: string[]): Promise<string[]>;
   /** Paths the Storage API reports as removed. Throws on an error response. */
   removeFiles(paths: string[]): Promise<string[]>;
   /** True only when the object is definitely absent (public HEAD answered 400 or 404). */
@@ -46,6 +51,7 @@ export interface Io {
 }
 
 export const LIBRARY_STATUSES = new Set(["saved", "library"]);
+export const BUCKET = "project-assets";
 export const REQUEST_GRACE_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -59,6 +65,8 @@ export type Summary = {
   library_kept: number;
   storage_removed: number;
   already_gone: number;
+  shared_files: number;
+  files_kept: number;
   requests: number;
   logged: number;
   errors: string[];
@@ -89,20 +97,27 @@ export async function runCleanup(io: Io, opts: { graceDays: number; now: number 
   for (const i of [...articleOwned, ...rejected]) byId.set(i.id, i);
   const candidates = [...byId.values()];
 
-  // 3. Remove files; settle the ones the API did not report.
-  const paths = [...new Set(candidates.map((i) => i.storage_path).filter((p): p is string => !!p))];
+  // 3. Files: only project-assets ones, and never one another surviving row still uses. If that
+  //    lookup fails, no file is removed (and so no row with a file is deleted).
+  const ours = (i: Row) => (i.storage_bucket ?? BUCKET) === BUCKET;
+  const paths = [...new Set(candidates.filter(ours).map((i) => i.storage_path).filter((p): p is string => !!p))];
+  const inUse = paths.length
+    ? await step<string[] | null>("check shared paths", () => io.pathsInUse(paths, candidates.map((i) => i.id)), null)
+    : [];
+  const shared = new Set(inUse ?? []);
+  const toRemove = inUse === null ? [] : paths.filter((p) => !shared.has(p));
   const gone = new Set<string>();
-  if (paths.length) {
-    for (const p of await step<string[]>("remove files", () => io.removeFiles(paths), [])) if (paths.includes(p)) gone.add(p);
+  if (toRemove.length) {
+    for (const p of await step<string[]>("remove files", () => io.removeFiles(toRemove), [])) if (toRemove.includes(p)) gone.add(p);
   }
   const storageRemoved = gone.size;
-  const unsure = paths.filter((p) => !gone.has(p));
+  const unsure = toRemove.filter((p) => !gone.has(p));
   const flags = await Promise.all(unsure.map((p) => io.fileGone(p).catch(() => false)));
   unsure.forEach((p, k) => { if (flags[k]) gone.add(p); });
   const alreadyGone = gone.size - storageRemoved;
 
-  // 4. Delete the image rows whose file is gone (or that have none); trust only returned ids.
-  const ready = candidates.filter((i) => !i.storage_path || gone.has(i.storage_path));
+  // 4. Delete the image rows whose file is gone, still shared, or absent; trust only returned ids.
+  const ready = candidates.filter((i) => !i.storage_path || (ours(i) && (gone.has(i.storage_path) || shared.has(i.storage_path))));
   const imgDeleted = new Set(ready.length ? await step<string[]>("delete images", () => io.deleteImages(ready.map((i) => i.id)), []) : []);
   const deletedImages = ready.filter((i) => imgDeleted.has(i.id));
 
@@ -137,6 +152,8 @@ export async function runCleanup(io: Io, opts: { graceDays: number; now: number 
     library_kept: library.length,
     storage_removed: storageRemoved,
     already_gone: alreadyGone,
+    shared_files: shared.size,
+    files_kept: unsure.length - alreadyGone,
     requests: deletedRequests.length,
     logged,
     errors,

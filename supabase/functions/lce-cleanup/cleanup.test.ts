@@ -20,6 +20,9 @@ type World = {
   deleteArticlesShort?: boolean;  // the delete returns fewer ids than asked
   logError?: string;
   head?: (path: string) => boolean | "throw";
+  extraRemoved?: string;          // remove() also reports a path that was not asked for
+  inUseError?: string;
+  shortRequests?: boolean;        // the request delete returns fewer ids than asked
 };
 
 function world(over: Partial<World> = {}): World {
@@ -49,12 +52,17 @@ function fake(w: World) {
     articleImages: async (ids) => w.images.filter((i) => ids.includes(i.article_id ?? "")),
     expiredRejected: async () => w.images.filter((i) => i.status === "rejected"),
     staleRequests: async () => w.requests,
+    pathsInUse: async (paths, exclude) => {
+      if (w.inUseError) throw new Error(w.inUseError);
+      return [...new Set(w.images.filter((i) => !exclude.includes(i.id) && (i.storage_bucket ?? "project-assets") === "project-assets"
+        && paths.includes(i.storage_path ?? "")).map((i) => i.storage_path as string))];
+    },
     removeFiles: async (paths) => {
       calls.removed.push(paths);
       if (w.removeError) throw new Error(w.removeError);
       const out = paths.filter((p) => w.files.has(p) && !w.hidden.has(p));
       out.forEach((p) => w.files.delete(p));
-      return out;
+      return w.extraRemoved ? [...out, w.extraRemoved] : out;
     },
     fileGone: async (p) => {
       calls.heads.push(p);
@@ -76,7 +84,12 @@ function fake(w: World) {
       w.images.forEach((i) => { if (done.includes(i.article_id ?? "")) i.article_id = null; });
       return done;
     },
-    deleteRequests: async (ids) => { calls.deleted.requests.push(ids); w.requests = w.requests.filter((r) => !ids.includes(r.id)); return ids; },
+    deleteRequests: async (ids) => {
+      calls.deleted.requests.push(ids);
+      const done = w.shortRequests ? [] : ids;
+      w.requests = w.requests.filter((r) => !done.includes(r.id));
+      return done;
+    },
     insertLog: async (rows) => { if (w.logError) throw new Error(w.logError); calls.log.push(...rows); },
   };
   return { io, calls };
@@ -174,6 +187,59 @@ test("TC-SB635-03: image_requests purges are logged; a failed log insert is repo
   assert.equal(s2.ok, false);
   assert.equal(s2.logged, 0);
   assert.match(s2.errors.join(";"), /insert log: log down/);
+});
+
+// Verifier, 2026-10-25: storage_path is not unique. A file a surviving row still uses stays.
+test("TC-SB633-01: a file shared with a surviving library row is not removed", async () => {
+  const w = world();
+  w.images.push({ id: "lib2", storage_path: "lce-images/a2/candidate-1.png", status: "library", article_id: null, user_id: "u" });
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.ok(!calls.removed.flat().includes("lce-images/a2/candidate-1.png"), "shared file must stay");
+  assert.ok(w.files.has("lce-images/a2/candidate-1.png"));
+  assert.ok(calls.deleted.images.flat().includes("c2"), "the purged row lets go of the shared file");
+  assert.equal(s.shared_files, 1);
+  assert.deepEqual(ids(calls.log, "article"), ["a1", "a2"]);
+});
+
+test("a failed shared-path lookup removes no file and deletes only file-less rows", async () => {
+  const w = world({ inUseError: "lookup down" });
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.equal(s.ok, false);
+  assert.deepEqual(calls.removed, []);
+  assert.deepEqual(calls.deleted.images, [["nf"]]);
+  assert.deepEqual(calls.deleted.articles, []);
+});
+
+test("rows outside project-assets are kept and block their article", async () => {
+  const w = world();
+  w.images.find((i) => i.id === "c2")!.storage_bucket = "other-bucket";
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.ok(!calls.removed.flat().includes("lce-images/a2/candidate-1.png"));
+  assert.ok(!calls.deleted.images.flat().includes("c2"));
+  assert.deepEqual(calls.deleted.articles, [["a1"]]);
+  assert.equal(s.articles_kept, 1);
+});
+
+test("counts: storage_removed is what remove() reported, ignoring paths not asked for; files_kept counts the unsure", async () => {
+  const w = world({ extraRemoved: "lce-images/unrelated.png" });
+  w.hidden.add("lce-images/x/rejected.png");
+  w.head = () => false;
+  const { io } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.equal(s.storage_removed, 3);   // c1, h1 and c2 files; rejected is hidden; the unrelated path is ignored
+  assert.equal(s.files_kept, 1);
+  assert.equal(s.images_kept, 1);
+});
+
+test("only request ids the delete returned are logged", async () => {
+  const w = world({ shortRequests: true });
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.equal(s.requests, 0);
+  assert.deepEqual(ids(calls.log, "image_request"), []);
 });
 
 test("a failed image lookup deletes no article", async () => {

@@ -37,7 +37,7 @@ const GRACE_DEFAULT = 30;
 const GRACE_MIN = 1;    // 0 or less would set the cutoff at or after "now"
 const GRACE_MAX = 365;
 
-const IMAGE_COLS = "id,storage_path,user_id,status,article_id";
+const IMAGE_COLS = "id,storage_path,storage_bucket,user_id,status,article_id";
 
 Deno.serve(async (req: Request) => {
   const url = Deno.env.get("SUPABASE_URL")!;
@@ -67,6 +67,12 @@ Deno.serve(async (req: Request) => {
     articleImages: async (artIds) => rows(await sb.from("image_assets").select(IMAGE_COLS).in("article_id", artIds)),
     expiredRejected: async (cutoff) => rows(await sb.from("image_assets").select(IMAGE_COLS).eq("status", "rejected").lt("updated_at", cutoff)),
     staleRequests: async (cutoff) => rows(await sb.from("image_requests").select("id,user_id").in("status", ["done", "failed"]).lt("updated_at", cutoff)),
+    pathsInUse: async (paths, exclude) => {
+      const q = sb.from("image_assets").select("storage_path").eq("storage_bucket", BUCKET).in("storage_path", paths);
+      const r = exclude.length ? await q.not("id", "in", `(${exclude.join(",")})`) : await q;
+      if (r.error) throw new Error(r.error.message);
+      return [...new Set((r.data ?? []).map((x: { storage_path: string }) => x.storage_path))];
+    },
     removeFiles: async (paths) => {
       const { data, error } = await sb.storage.from(BUCKET).remove(paths);
       if (error) throw new Error(error.message);
