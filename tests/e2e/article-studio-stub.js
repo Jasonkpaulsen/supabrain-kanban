@@ -118,6 +118,11 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
     db.articles.find((a) => a.id === args.p_article_id).image_asset_id = args.p_image_id;
     return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ ok: true, demoted }) });
   });
+  // SB-634 (verifier): PostgREST returns written rows only for Prefer: return=representation, which
+  // supabase-js sends when the write is followed by .select(). Without it the answer has no body.
+  const written = (r, req, status, out) => ((req.headers()['prefer'] || '').includes('return=representation')
+    ? r.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify(out) })
+    : r.fulfill({ status: 204, headers: CORS, body: '' }));
   await page.route('**/rest/v1/**', async (r) => {
     const req = r.request();
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
@@ -150,7 +155,7 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
       calls.deletes.push({ table, ids: hit.map((x) => x.id) });
       if (table === 'articles') db.articles = db.articles.filter((x) => !hit.includes(x));
       if (table === 'image_assets') db.images = db.images.filter((x) => !hit.includes(x));
-      return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(hit.map((x) => ({ id: x.id }))) });
+      return written(r, req, 200, hit.map((x) => ({ id: x.id })));
     }
     if (req.method() === 'PATCH') {
       if (patchDelayMs) await new Promise((res) => setTimeout(res, patchDelayMs));
@@ -158,15 +163,15 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
       const hit = (table === 'articles' && noopPatch) || (table === 'image_assets' && noopImagePatch) ? [] : filterRows(url, rows);
       hit.forEach((x) => Object.assign(x, patch));
       calls.patches.push({ table, ids: hit.map((x) => x.id), patch });
-      return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(hit.map((x) => ({ id: x.id }))) });
+      return written(r, req, 200, hit.map((x) => ({ id: x.id })));
     }
     if (req.method() === 'POST' && table === 'articles') {
       const row = JSON.parse(req.postData() || '{}');
       calls.inserts.push({ table, row });
-      if (noopInsert) return r.fulfill({ status: 201, headers: CORS, contentType: 'application/json', body: '[]' });
+      if (noopInsert) return written(r, req, 201, []);
       const made = { id: `new-${calls.inserts.length}`, updated_at: now, created_at: now, feedback_history: [], ...row };
       db.articles.push(made);
-      return r.fulfill({ status: 201, headers: CORS, contentType: 'application/json', body: JSON.stringify([{ id: made.id }]) });
+      return written(r, req, 201, [{ id: made.id }]);
     }
     if (req.method() === 'POST' && table === 'lce_deletion_log') {
       if (failLog) return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"log down"}' });

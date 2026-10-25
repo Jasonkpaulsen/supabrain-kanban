@@ -76,6 +76,17 @@ test.describe('@sb634 @sb636 Article Studio writes', () => {
     expect(calls.logs.filter((l) => l.entity_type === 'article')).toEqual([]);
   });
 
+  test('TC-SB634-02d Empty Trash whose lookup fails says so, not "already empty"', async ({ page }) => {
+    const { calls } = await openStudio(page);
+    await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+    await page.route('**/rest/v1/articles?*status=eq.trashed*', (r) => (r.request().method() === 'GET'
+      ? r.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: '{"message":"article lookup down"}' })
+      : r.fallback()));
+    await page.locator('button:has-text("Empty Trash")').click();
+    await expect(toast(page)).toHaveText('article lookup down');
+    expect(calls.deletes).toEqual([]);
+  });
+
   test('TC-SB634-02c image rows the delete did not return keep the article and are not logged', async ({ page }) => {
     const { calls, db } = await openStudio(page, { noopImageDelete: true });
     await openTrashedArticle(page, 'Trashed one');
@@ -107,6 +118,45 @@ test.describe('@sb634 @sb636 Article Studio writes', () => {
     await page.locator('button.ref:has-text("↻")').click();
     await expect(page.locator('#login')).toBeVisible();
     await expect(page.locator('#loginErr')).toHaveText('Session ended — sign in again');
+  });
+
+  test('TC-SB634-03d signing out clears the password and closes the open article', async ({ page }) => {
+    const { db } = await openStudio(page);
+    await openDraft(page, db);
+    await page.locator('#signOut').click();
+    await expect(page.locator('#login')).toBeVisible();
+    await expect(page.locator('#password')).toHaveValue('');
+    await expect(page.locator('#sheet')).not.toHaveClass(/open/);
+    await expect(page.locator('#sheetBody')).toBeEmpty();
+    await expect(page.getByText('Draft one')).toHaveCount(0);
+    // signing in again shows the articles again
+    await page.fill('#password', 'stubbed');
+    await page.click('button:has-text("Enter Studio")');
+    await expect(page.locator('#app')).toBeVisible();
+    await page.locator("[onclick=\"setFilter('draft')\"]").first().click();
+    await expect(page.locator('.card', { hasText: 'Draft one' })).toBeVisible();
+  });
+
+  test('TC-SB634-03e a session check that fails for the network shows offline, not the login screen', async ({ page }) => {
+    await openStudio(page);
+    await page.evaluate(() => { sb.auth.getSession = async () => ({ data: { session: null }, error: Object.assign(new Error('Failed to fetch'), { name: 'AuthRetryableFetchError' }) }); });
+    await page.locator('button.ref:has-text("↻")').click();
+    await expect(page.locator('#offline')).toBeVisible();
+    await expect(page.locator('#app')).toBeVisible();
+    await expect(page.locator('#login')).toBeHidden();
+  });
+
+  test('TC-SB634-03f coming back online on the login screen loads nothing and keeps the message', async ({ page }) => {
+    await openStudio(page);
+    await page.locator('#signOut').click();
+    await expect(page.locator('#login')).toBeVisible();
+    const gets = [];
+    page.on('request', (q) => { if (q.method() === 'GET' && q.url().includes('/rest/v1/')) gets.push(q.url()); });
+    await page.evaluate(() => { document.getElementById('loginErr').textContent = 'Wrong password'; window.dispatchEvent(new Event('online')); });
+    await page.waitForTimeout(300);
+    await expect(page.locator('#loginErr')).toHaveText('Wrong password');
+    await expect(page.locator('#login')).toBeVisible();
+    expect(gets).toEqual([]);
   });
 
   test('TC-SB636-02a Accept goes through set_article_header once', async ({ page }) => {
