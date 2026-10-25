@@ -3,7 +3,7 @@
 // SB-631: bumped for the removal fix in index.html.
 // SB-633/SB-635: bumped for library-safe removals and purge logging.
 // SB-634/SB-636: bumped for checked writes, sign-out and the header RPC.
-const CACHE = 'article-studio-v7';
+const CACHE = 'article-studio-v8';
 const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {

@@ -159,6 +159,70 @@ test.describe('@sb634 @sb636 Article Studio writes', () => {
     expect(gets).toEqual([]);
   });
 
+  test('TC-SB634-03g a session that ends closes the new-article sheet', async ({ page }) => {
+    await openStudio(page);
+    await page.evaluate(() => openNewArticle());
+    await expect(page.locator('#newSheet')).toHaveClass(/open/);
+    await page.evaluate(() => sb.auth.signOut({ scope: 'local' }));
+    await expect(page.locator('#login')).toBeVisible();
+    await expect(page.locator('#newSheet')).not.toHaveClass(/open/);
+  });
+
+  test('TC-SB634-03h a load still running at sign-out draws nothing afterwards', async ({ page }) => {
+    await openStudio(page);
+    let release;
+    const held = new Promise((res) => { release = res; });
+    await page.route('**/rest/v1/articles?*', async (r) => {
+      if (r.request().method() !== 'GET') return r.fallback();
+      await held;
+      return r.fallback();
+    });
+    await page.locator('button.ref:has-text("↻")').click();
+    await page.locator('#signOut').click();
+    await expect(page.locator('#login')).toBeVisible();
+    release();
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => ARTICLES.length)).toBe(0);
+    for (const id of ['#tabs', '#stats', '#recs', '#list']) await expect(page.locator(id)).toBeEmpty();
+  });
+
+  test('TC-SB634-03i signing out clears the calendar and library and returns to the board', async ({ page }) => {
+    await openStudio(page);
+    await page.click('#n-lib');
+    await expect(page.locator('#libGrid .card').first()).toBeVisible();
+    await page.click('#n-cal');
+    await expect(page.locator('#agenda')).not.toBeEmpty();
+    await page.locator('#signOut').click();
+    await expect(page.locator('#login')).toBeVisible();
+    await expect(page.locator('#login')).toHaveCSS('display', 'flex');
+    for (const id of ['#agenda', '#libGrid', '#purgedList', '#tabs', '#stats']) await expect(page.locator(id)).toBeEmpty();
+    await expect(page.locator('#n-board')).toHaveClass(/on/);
+  });
+
+  test('TC-SB634-03j a session check refused by the server online shows the login screen', async ({ page }) => {
+    await openStudio(page);
+    await page.evaluate(() => { sb.auth.getSession = async () => ({ data: { session: null }, error: Object.assign(new Error('Invalid Refresh Token'), { name: 'AuthApiError', status: 400 }) }); });
+    await page.locator('button.ref:has-text("↻")').click();
+    await expect(page.locator('#login')).toBeVisible();
+    await expect(page.locator('#loginErr')).toHaveText('Session ended — sign in again');
+    await expect(page.locator('#offline')).toBeHidden();
+  });
+
+  test('TC-SB634-03k offline: a failed session check shows the banner; the next good load hides it', async ({ page }) => {
+    await openStudio(page);
+    await page.evaluate(() => {
+      window.__gs = sb.auth.getSession.bind(sb.auth);
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+      sb.auth.getSession = async () => ({ data: { session: null }, error: new Error('Failed to fetch') });
+    });
+    await page.locator('button.ref:has-text("↻")').click();
+    await expect(page.locator('#offline')).toBeVisible();
+    await expect(page.locator('#app')).toBeVisible();
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true }); sb.auth.getSession = window.__gs; });
+    await page.locator('button.ref:has-text("↻")').click();
+    await expect(page.locator('#offline')).toBeHidden();
+  });
+
   test('TC-SB636-02a Accept goes through set_article_header once', async ({ page }) => {
     const { calls, db, errors } = await openStudio(page);
     await openTrashedArticle(page, 'Trashed one');

@@ -116,13 +116,14 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
     const img = db.images.find((i) => i.id === args.p_image_id);
     img.status = 'accepted'; img.article_id = args.p_article_id;
     db.articles.find((a) => a.id === args.p_article_id).image_asset_id = args.p_image_id;
-    return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ ok: true, demoted }) });
+    return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ ok: true, demoted, detached: 0 }) });
   });
   // SB-634 (verifier): PostgREST returns written rows only for Prefer: return=representation, which
-  // supabase-js sends when the write is followed by .select(). Without it the answer has no body.
+  // supabase-js sends when the write is followed by .select(). Without it the answer has no body
+  // (201 for an insert, 204 otherwise).
   const written = (r, req, status, out) => ((req.headers()['prefer'] || '').includes('return=representation')
     ? r.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify(out) })
-    : r.fulfill({ status: 204, headers: CORS, body: '' }));
+    : r.fulfill({ status: status === 201 ? 201 : 204, headers: CORS, body: '' }));
   await page.route('**/rest/v1/**', async (r) => {
     const req = r.request();
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
