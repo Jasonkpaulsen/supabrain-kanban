@@ -150,6 +150,7 @@
     <div style="display:flex;gap:8px">
       <button class="ref" onclick="openNewArticle()" style="color:var(--gold);font-size:18px;padding:7px 12px" title="New Article">＋</button>
       <button class="ref" onclick="load()">↻</button>
+      <button class="ref" id="signOut" onclick="doSignOut()" title="Sign out">⎋</button>
     </div>
   </header>
   <div class="app">
@@ -241,17 +242,27 @@ async function doLogin(){
 }
 async function checkSession(){const {data}=await sb.auth.getSession();if(data.session){USER=data.session.user;showApp();}}
 function showApp(){document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';load();}
+// SB-634: a lapsed or ended session returns to the login screen instead of leaving an empty list
+// (requests would run as anon, which RLS shows nothing). supabase-js emits SIGNED_OUT when a token
+// refresh fails as well as on sign-out.
+function showLogin(msg){USER=null;ARTICLES=[];CURRENT=null;document.getElementById('app').style.display='none';document.getElementById('login').style.display='block';document.getElementById('loginErr').textContent=msg||'';}
+sb.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT')showLogin('Signed out — sign in again');});
+async function doSignOut(){await sb.auth.signOut();showLogin('');}
 window.addEventListener('online',()=>{document.getElementById('offline').style.display='none';load();});
 window.addEventListener('offline',()=>{document.getElementById('offline').style.display='block';});
 checkSession();
 
 async function load(){
+  const {data:ses}=await sb.auth.getSession();if(!ses.session){showLogin('Session ended — sign in again');return;}
   const {data,error}=await sb.from('articles').select('*').order('updated_at',{ascending:false});
   if(error){toast(error.message);return;}
   ARTICLES=data||[];renderStats();renderRecs();renderTabs();renderList();
   if(VIEW==='cal')renderAgenda();if(VIEW==='lib')renderLibrary();if(VIEW==='purged')renderPurged();
 }
-async function patch(id,f){const {error}=await sb.from('articles').update(f).eq('id',id);if(error){toast('Save failed: '+error.message);return false;}return true;}
+// SB-634: a write is done only when the database returns the row. RLS filters a row it hides
+// without an error, so an update that matched nothing used to report success.
+const NOT_SAVED='Not saved — this article changed or is no longer yours';
+async function patch(id,f){const {data,error}=await sb.from('articles').update(f).eq('id',id).select('id');if(error){toast('Save failed: '+error.message);return false;}if(!data||!data.length){toast(NOT_SAVED);return false;}return true;}
 function countBy(s){return ARTICLES.filter(a=>a.status===s).length;}
 
 function renderStats(){
@@ -346,9 +357,9 @@ async function restore(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id
 // SB-631: an image row goes only when its file went. A removal that reported nothing kept the
 // file, so the article stays in Trash with those images and can be retried; removing it anyway
 // would strand them (article_id is ON DELETE SET NULL and the library shows only saved images).
-async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket').eq('article_id',id).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const imgLog=imageLog(done,'manual_delete');if(kept.length){const lg=await logPurge(imgLog);toast(`${kept.length} file(s) not removed — article kept in Trash`+(lg?'':' (purge log not written)'));loadArticleImages(id);return;}const {error}=await sb.from('articles').delete().eq('id',id);if(error){await logPurge(imgLog);toast(error.message);return;}const lg=await logPurge([...imgLog,{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast(lg?'Deleted':'Deleted — purge log not written');closeSheet();load();}
+async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket').eq('article_id',id).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const imgLog=imageLog(done,'manual_delete');if(kept.length){const lg=await logPurge(imgLog);toast(`${kept.length} file(s) not removed — article kept in Trash`+(lg?'':' (purge log not written)'));loadArticleImages(id);return;}const {data:gone,error}=await sb.from('articles').delete().eq('id',id).select('id');if(error||!gone||!gone.length){await logPurge(imgLog);toast(error?error.message:'Article not removed — it changed or is no longer yours');return;}const lg=await logPurge([...imgLog,{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast(lg?'Deleted':'Deleted — purge log not written');closeSheet();load();}
 async function markPublished(id){const url=prompt('LinkedIn post URL (optional):','');const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'published',published_url:url||null,feedback_history:pushHist(a,'published',url||'')})){toast('Published');closeSheet();load();}}
-async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket,article_id').in('article_id',ids).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const held=new Set(kept.map(i=>i.article_id));const go=(arts||[]).filter(a=>!held.has(a.id));let rows=imageLog(done,'manual_empty_trash');if(go.length){const {error}=await sb.from('articles').delete().in('id',go.map(a=>a.id));if(error){await logPurge(rows);toast(error.message);return;}rows=rows.concat(go.map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));}const lg=await logPurge(rows);toast((held.size?`Purged ${go.length}, kept ${held.size} — ${kept.length} file(s) not removed`:`Purged ${go.length}`)+(lg?'':' — purge log not written'));load();}
+async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket,article_id').in('article_id',ids).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const held=new Set(kept.map(i=>i.article_id));const go=(arts||[]).filter(a=>!held.has(a.id));let rows=imageLog(done,'manual_empty_trash');let purged=[];if(go.length){const {data:gone,error}=await sb.from('articles').delete().in('id',go.map(a=>a.id)).select('id');if(error){await logPurge(rows);toast(error.message);return;}const ids=new Set((gone||[]).map(g=>g.id));purged=go.filter(a=>ids.has(a.id));rows=rows.concat(purged.map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));}const notGone=go.length-purged.length+held.size;const lg=await logPurge(rows);toast((notGone?`Purged ${purged.length}, kept ${notGone}`+(kept.length?` — ${kept.length} file(s) not removed`:''):`Purged ${purged.length}`)+(lg?'':' — purge log not written'));load();}
 
 /* images */
 async function loadArticleImages(articleId){
@@ -367,12 +378,16 @@ async function loadArticleImages(articleId){
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><button class="btn-ghost" onclick="requestNewImages('${articleId}')">✨ Request set</button><button class="btn-ghost" onclick="openLibraryPicker('${articleId}')">🖼 Use saved</button></div><div id="libPick"></div>`;
   z.innerHTML=html;
 }
-async function acceptImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');const {error}=await sb.from('image_assets').update({status:'accepted'}).eq('id',id);if(error){toast(error.message);return;}await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
-async function rejectImage(id){await sb.from('image_assets').update({status:'rejected'}).eq('id',id);toast('Rejected');loadArticleImages(CURRENT.id);}
-async function saveImage(id){await sb.from('image_assets').update({status:'saved'}).eq('id',id);toast('Saved to library');loadArticleImages(CURRENT.id);}
+// SB-636: one RPC, one transaction: demote the old header, accept this image, point the article at it.
+async function setHeader(id,articleId){const {error}=await sb.rpc('set_article_header',{p_article_id:articleId,p_image_id:id});if(error){toast('Header not changed: '+error.message);return false;}toast('Set as header');loadArticleImages(articleId);return true;}
+async function acceptImage(id,articleId){await setHeader(id,articleId);}
+// SB-636: capture the article before any await (the sheet may close meanwhile) and check the row changed.
+async function setImageStatus(id,status,done){const aid=CURRENT&&CURRENT.id;const {data,error}=await sb.from('image_assets').update({status}).eq('id',id).select('id');if(error){toast(error.message);return;}if(!data||!data.length){toast('Not saved — this image changed or is no longer yours');return;}toast(done);if(aid)loadArticleImages(aid);}
+async function rejectImage(id){await setImageStatus(id,'rejected','Rejected');}
+async function saveImage(id){await setImageStatus(id,'saved','Saved to library');}
 async function requestNewImages(articleId){const fb=(document.getElementById('imgfb')||{}).value;const a=ARTICLES.find(x=>x.id===articleId);const {error}=await sb.from('image_requests').insert({article_id:articleId,prompt:a&&(a.header_image_prompt||a.hook||a.title),feedback:(fb||'').trim()||null,count:3,status:'pending'});if(error){toast(error.message);return;}toast('New set requested');}
 async function openLibraryPicker(articleId){const p=document.getElementById('libPick');const {data}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const imgs=data||[];if(!imgs.length){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">No saved images yet.</div>';return;}p.innerHTML='<div class="muted" style="font-size:12px;margin:10px 0 6px">Pick a saved image:</div><div class="imgrid">'+imgs.map(i=>`<div class="imgcard"><img src="${esc(i.public_url)}" onclick="useLibraryImage('${i.id}','${articleId}')"><div class="imgcap">${esc(i.description||i.prompt||'')}</div></div>`).join('')+'</div>';}
-async function useLibraryImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');await sb.from('image_assets').update({status:'accepted',article_id:articleId}).eq('id',id);await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
+async function useLibraryImage(id,articleId){if(await setHeader(id,articleId)){const p=document.getElementById('libPick');if(p)p.innerHTML='';}}
 
 /* scheduling */
 function nextSlotDate(slot,after){const d=new Date(after.getTime());d.setSeconds(0,0);for(let i=0;i<21;i++){const c=new Date(d.getTime()+i*864e5);if(c.getDay()===slot.dow){c.setHours(slot.h,slot.m,0,0);if(c>after)return c;}}return null;}
@@ -446,8 +461,9 @@ async function removeImages(imgs){imgs=imgs||[];const paths=[...new Set(imgs.map
   const unsure=[...new Map(imgs.filter(i=>i.storage_path&&!gone.has(i.storage_path)).map(i=>[i.storage_path,i])).values()];
   (await Promise.all(unsure.map(async i=>(await fileGone(i))?i.storage_path:null))).forEach(p=>{if(p)gone.add(p);});
   const done=imgs.filter(i=>!i.storage_path||gone.has(i.storage_path));
-  if(done.length){const {error}=await sb.from('image_assets').delete().in('id',done.map(i=>i.id));if(error)return {kept:imgs,done:[],err:error.message};}
-  return {kept:imgs.filter(i=>!done.includes(i)),done,err:null};}
+  // SB-634: only rows the delete returned count as removed.
+  let removed=[];if(done.length){const {data:gone,error}=await sb.from('image_assets').delete().in('id',done.map(i=>i.id)).select('id');if(error)return {kept:imgs,done:[],err:error.message};const ids=new Set((gone||[]).map(g=>g.id));removed=done.filter(i=>ids.has(i.id));}
+  return {kept:imgs.filter(i=>!removed.includes(i)),done:removed,err:null};}
 // SB-635: the purge log records every image row a manual removal took, not only the article.
 function imageLog(imgs,reason){return (imgs||[]).map(i=>({entity_type:'image',entity_id:i.id,storage_path:i.storage_path||null,reason}));}
 // SB-635: a failed log write is reported (callers fold it into their toast) instead of being ignored.
@@ -491,8 +507,9 @@ async function createArticle(){
     source:'article-studio',
     meta:{created_via:'article-studio-pwa',created_at:new Date().toISOString()}
   };
-  const {error}=await sb.from('articles').insert(row);
+  const {data:made,error}=await sb.from('articles').insert(row).select('id');
   if(error){toast('Error: '+error.message);return;}
+  if(!made||!made.length){toast('Draft not created');return;}
   toast('Draft created');
   closeNewSheet();
   await load();

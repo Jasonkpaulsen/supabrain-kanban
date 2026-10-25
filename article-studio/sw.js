@@ -2,7 +2,8 @@
 // SB-182: bumped for config.js entering the shell.
 // SB-631: bumped for the removal fix in index.html.
 // SB-633/SB-635: bumped for library-safe removals and purge logging.
-const CACHE = 'article-studio-v5';
+// SB-634/SB-636: bumped for checked writes, sign-out and the header RPC.
+const CACHE = 'article-studio-v6';
 const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {
