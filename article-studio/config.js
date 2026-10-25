@@ -1,10 +1,8 @@
-/* SB-182 — the one place this project's Supabase URL and publishable key live.
+/* SB-182 — the one place Article Studio's Supabase URL and publishable key live.
  *
- * This is Article Studio's copy. It ships as its own site from the
- * lce-article-studio repository, where index.html sits at the root and
- * ../config.js would not resolve — so each deployment unit carries exactly
- * one config file rather than sharing one across a boundary that does not
- * exist at runtime. Keep this file and the repo-root config.js in step.
+ * SB-632 (Jason, 2026-10-25): supabrain-kanban/article-studio/ is the only home of
+ * Article Studio, served at <pages>/article-studio/. Change the app only here. The
+ * repo-root config.js serves the boards; keep the two in step if the key rotates.
  *
  * THIS KEY IS MEANT TO BE PUBLIC. A publishable key identifies the app, not the
  * user — it is the modern replacement for the legacy `anon` JWT and Supabase

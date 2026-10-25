@@ -35,6 +35,9 @@ function seed() {
       image('i3', `lce-images/${A2}/candidate-1.png`, A2),
       image('lib1', 'lce-images/library/saved-1.png', null, 'saved'),
       image('nofile', null, null, 'saved'),
+      // SB-633: images saved to the library from a trashed article stay when the article goes
+      image('sv', `lce-images/${A1}/saved.png`, A1, 'saved'),
+      image('lb', `lce-images/${A2}/library.png`, A2, 'library'),
       // two rows on one path, as analyze-image leaves after a re-upload
       image('dupA', 'lce-images/library/dup.png', null, 'saved'),
       image('dupB', 'lce-images/library/dup.png', null, 'saved'),
@@ -49,11 +52,12 @@ function filterRows(url, rows) {
   return rows.filter((r) => {
     for (const [k, v] of q) {
       if (['select', 'order', 'limit', 'offset'].includes(k)) continue;
-      const m = /^(eq|in)\.(.*)$/.exec(v);
+      const m = /^(not\.)?(eq|in)\.(.*)$/.exec(v);
       if (!m) continue;
       const val = r[k] == null ? 'null' : String(r[k]);
-      if (m[1] === 'eq' && val !== m[2]) return false;
-      if (m[1] === 'in' && !m[2].replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(val)) return false;
+      const hit = m[2] === 'eq' ? val === m[3]
+        : m[3].replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(val);
+      if (m[1] ? hit : !hit) return false;
     }
     return true;
   });
@@ -61,7 +65,7 @@ function filterRows(url, rows) {
 
 // removes(path): whether the Storage DELETE may take that file (false models a file RLS hides).
 // Files are state: a removed file is gone for good, and HEAD on its public URL then answers 400.
-async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false, head = null } = {}) {
+async function openStudio(page, { removes = () => true, storageStatus = 200, storageAbort = false, failImageDeletes = 0, failImageGet = false, head = null, failLog = false, failArticleDelete = false, failSharedLookup = false } = {}) {
   const db = seed();
   db.files = new Set(db.images.map((i) => i.storage_path).filter(Boolean));
   const calls = { storage: [], deletes: [], logs: [], heads: [] };
@@ -109,6 +113,9 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
     const table = new URL(url).pathname.split('/').pop();
     const rows = table === 'articles' ? db.articles : table === 'image_assets' ? db.images : [];
     if (req.method() === 'GET') {
+      if (failSharedLookup && table === 'image_assets' && /storage_path=/.test(url)) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"shared lookup down"}' });
+      }
       if (failImageGet && table === 'image_assets' && /article_id=/.test(url)) {
         return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"lookup down"}' });
       }
@@ -122,6 +129,9 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
         calls.deletes.push({ table, ids: [], failed: true });
         return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"row delete down"}' });
       }
+      if (table === 'articles' && failArticleDelete) {
+        return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"article delete down"}' });
+      }
       const hit = filterRows(url, rows);
       calls.deletes.push({ table, ids: hit.map((x) => x.id) });
       if (table === 'articles') db.articles = db.articles.filter((x) => !hit.includes(x));
@@ -129,6 +139,7 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
       return r.fulfill({ status: 204, headers: CORS, body: '' });
     }
     if (req.method() === 'POST' && table === 'lce_deletion_log') {
+      if (failLog) return r.fulfill({ status: 503, headers: CORS, contentType: 'application/json', body: '{"message":"log down"}' });
       calls.logs.push(...JSON.parse(req.postData() || '[]'));
       return r.fulfill({ status: 201, headers: CORS, body: '' });
     }
@@ -192,7 +203,8 @@ test.describe('@sb631 Article Studio removals', () => {
     await expect(toast(page)).toHaveText('1 file(s) not removed — article kept in Trash');
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['i1'] }]);
     expect(deletesOf(calls, 'articles')).toEqual([]);
-    expect(calls.logs).toEqual([]);
+    // SB-635: the image row that did go is logged; the kept article is not
+    expect(calls.logs).toEqual([expect.objectContaining({ entity_type: 'image', entity_id: 'i1', reason: 'manual_delete' })]);
     expect(db.articles.map((a) => a.id)).toContain(A1);
     expect(db.images.map((i) => i.id)).toContain('i2');
     expect(errors).toEqual([]);
@@ -205,7 +217,11 @@ test.describe('@sb631 Article Studio removals', () => {
     await expect(toast(page)).toHaveText('Purged 1, kept 1 — 1 file(s) not removed');
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['i1', 'i3'] }]);
     expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A2] }]);
-    expect(calls.logs).toEqual([expect.objectContaining({ entity_type: 'article', entity_id: A2, reason: 'manual_empty_trash' })]);
+    expect(calls.logs).toEqual([
+      expect.objectContaining({ entity_type: 'image', entity_id: 'i1', reason: 'manual_empty_trash' }),
+      expect.objectContaining({ entity_type: 'image', entity_id: 'i3', reason: 'manual_empty_trash' }),
+      expect.objectContaining({ entity_type: 'article', entity_id: A2, reason: 'manual_empty_trash' }),
+    ]);
     expect(errors).toEqual([]);
   });
 
@@ -267,14 +283,16 @@ test.describe('@sb631 Article Studio removals', () => {
   });
 
   test('TC-SB631-06c two rows on one path: removing the second after the first still works', async ({ page }) => {
-    const { calls, errors } = await openStudio(page);
+    const { calls, errors, db } = await openStudio(page);
     await deleteLibraryImage(page, 'img dupA');
     await expect(toast(page)).toHaveText('Deleted');
     await expect(page.locator('#libGrid .card', { hasText: 'img dupA' })).toHaveCount(0);
     await page.locator('#libGrid .card', { hasText: 'img dupB' }).locator('button:has-text("Delete")').click();
     // the toast still says Deleted from the first removal, so wait on the card instead
     await expect(page.locator('#libGrid .card', { hasText: 'img dupB' })).toHaveCount(0);
-    expect(calls.heads).toContain('lce-images/library/dup.png');
+    // SB-633: the first removal leaves the file (dupB still uses it); the second takes it
+    expect(calls.storage).toEqual([['lce-images/library/dup.png']]);
+    expect(db.files.has('lce-images/library/dup.png')).toBe(false);
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['dupA'] }, { table: 'image_assets', ids: ['dupB'] }]);
     expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
   });
@@ -313,6 +331,99 @@ test.describe('@sb631 Article Studio removals', () => {
     await expect(toast(page)).toHaveText('Deleted');
     expect(calls.heads).toEqual(['lce-images/library/with space+plus?.png']);
     expect(deletesOf(calls, 'image_assets')).toEqual([{ table: 'image_assets', ids: ['spaced'] }]);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // SB-633: saved and library images are not part of an article's removal.
+  test('TC-SB633-02a deleting an article leaves its saved image alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A1}/saved.png`);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids)).not.toContain('sv');
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+    expect(db.images.map((i) => i.id)).toContain('sv');
+    expect(db.files.has(`lce-images/${A1}/saved.png`)).toBe(true);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB633-02b Empty Trash leaves saved and library images alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await page.locator("[onclick=\"setFilter('trashed')\"]").first().click();
+    await page.locator('button:has-text("Empty Trash")').click();
+    await expect(toast(page)).toHaveText('Purged 2');
+    expect(calls.storage.flat().filter((p) => /saved\.png|library\.png/.test(p))).toEqual([]);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids).sort()).toEqual(['i1', 'i2', 'i3']);
+    expect(db.images.map((i) => i.id)).toEqual(expect.arrayContaining(['sv', 'lb']));
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  // SB-635: manual removals log their image rows, and a failed log write is reported.
+  test('TC-SB635-04a deleting an article logs its image rows and the article', async ({ page }) => {
+    const { calls, errors } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.logs.map((l) => `${l.entity_type}:${l.entity_id}:${l.reason}`).sort()).toEqual(
+      [`article:${A1}:manual_delete`, 'image:i1:manual_delete', 'image:i2:manual_delete']);
+    expect(calls.logs.find((l) => l.entity_id === 'i1').storage_path).toBe(`lce-images/${A1}/candidate-1.png`);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB635-04b a failed purge-log write is reported, not hidden', async ({ page }) => {
+    const { calls } = await openStudio(page, { failLog: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted — purge log not written');
+    expect(deletesOf(calls, 'articles')).toEqual([{ table: 'articles', ids: [A1] }]);
+  });
+
+  // Verifier, 2026-10-25: a file shared with a surviving row stays.
+  test('TC-SB633-02c a file shared with a library image is not removed with the article', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    db.images.push(image('libdup', `lce-images/${A1}/candidate-1.png`, null, 'saved'));
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A1}/candidate-1.png`);
+    expect(db.files.has(`lce-images/${A1}/candidate-1.png`)).toBe(true);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids).sort()).toEqual(['i1', 'i2']);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB633-02d deleting an article leaves its library image alone', async ({ page }) => {
+    const { calls, errors, db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed two');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(`lce-images/${A2}/library.png`);
+    expect(deletesOf(calls, 'image_assets').flatMap((d) => d.ids)).toEqual(['i3']);
+    expect(db.images.map((i) => i.id)).toContain('lb');
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB635-04c a library delete with a failed purge log says so', async ({ page }) => {
+    await openStudio(page, { failLog: true }).then(() => deleteLibraryImage(page, 'img lib1'));
+    await expect(toast(page)).toHaveText('Deleted — purge log not written');
+  });
+
+  test('TC-SB635-04d image rows removed before a failed article delete are still logged', async ({ page }) => {
+    const { calls } = await openStudio(page, { failArticleDelete: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('article delete down');
+    expect(calls.logs.map((l) => `${l.entity_type}:${l.entity_id}`).sort()).toEqual(['image:i1', 'image:i2']);
+  });
+
+  test('TC-SB633-02e a failed shared-file lookup removes nothing', async ({ page }) => {
+    const { calls, errors } = await openStudio(page, { failSharedLookup: true });
+    await openTrashedArticle(page, 'Trashed one');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Images not removed: shared lookup down');
+    expect(calls.storage).toEqual([]);
+    expect(calls.deletes).toEqual([]);
+    expect(calls.logs).toEqual([]);
     expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
   });
 });
