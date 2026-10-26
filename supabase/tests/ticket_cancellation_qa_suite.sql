@@ -37,7 +37,7 @@ begin
   insert into public.work_items (project_id, user_id, ticket_code, title, type, status, priority, approval_status, authority_level) values
     (sb, ub, 'ZZQ-5', 'qa cancel from on_hold', 'task', 'on_hold', 'low', 'not_required', 1) returning id into s_hold;
   insert into public.work_items (project_id, user_id, ticket_code, title, type, status, priority, approval_status, authority_level) values
-    (sb, ub, 'ZZQ-6', 'qa cancel from awaiting_jason', 'task', 'awaiting_jason', 'low', 'pending', 1) returning id into s_aw;
+    (sb, ub, 'ZZQ-6', 'qa cancel from awaiting_jason', 'task', 'awaiting_jason', 'low', 'pending', 2) returning id into s_aw;  -- L2: SB-644 keeps L0/L1 out of awaiting_jason
   -- authority matrix
   insert into public.work_items (project_id, user_id, ticket_code, title, type, status, priority, approval_status, authority_level) values
     (sb, ub, 'ZZQ-10', 'qa L0', 'task', 'todo', 'low', 'not_required', 0) returning id into l0;
