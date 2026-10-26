@@ -13,7 +13,7 @@ declare
   r jsonb := '{}'::jsonb; fails int; st text; res jsonb;
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  a uuid; b uuid; a2 uuid; h0 uuid; c1 uuid; lib uuid; lib2 uuid; xi uuid; m uuid; snap text; cp uuid; cp2 uuid;
+  a uuid; b uuid; a2 uuid; h0 uuid; c1 uuid; lib uuid; lib2 uuid; xi uuid; m uuid; snap text; cp uuid; cp2 uuid; cp3 uuid; c3 uuid;
 begin
   insert into public.articles (user_id, title, status) values (o, 'qa-sb636 A', 'draft') returning id into a;
   insert into public.articles (user_id, title, status) values (x, 'qa-sb636 B', 'draft') returning id into b;
@@ -26,6 +26,7 @@ begin
   insert into public.articles (user_id, title, status) values (o, 'qa-sb636 A2', 'draft') returning id into a2;
   insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/m.png', o, a2, 'accepted') returning id into m;
   update public.articles set image_asset_id = m where id = a2;
+  insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/c3.png', o, a, 'candidate') returning id into c3;
 
   perform set_config('request.jwt.claims', json_build_object('sub', o, 'role', 'authenticated')::text, true);
   set local role authenticated;
@@ -98,6 +99,16 @@ begin
          case when (res->>'image_id')::uuid not in (cp, lib) and (select status from public.image_assets where id = cp2) = 'rejected'
                    and (select count(*) from public.image_assets where meta->>'copied_from' = lib::text) = 2
                    and (select count(*) from public.image_assets where article_id = a and status = 'accepted') = 1
+              then 'pass' else 'FAIL: ' || res::text end);
+  -- verifier 2026-10-26: a replaced copy whose library row is gone goes back to the library
+  res := public.set_article_header(a, lib2);
+  cp3 := (res->>'image_id')::uuid;
+  update public.image_assets set status = 'rejected' where id = lib2;   -- stands in for the library entry being deleted
+  res := public.set_article_header(a, c3);
+  r := r || jsonb_build_object('TC-SB643-01.last_copy_returns_to_library',
+         case when cp3 not in (lib2, cp2) and (select status from public.image_assets where id = cp3) = 'saved'
+                   and (select status from public.image_assets where id = cp2) = 'rejected'
+                   and (select image_asset_id from public.articles where id = a) = c3
               then 'pass' else 'FAIL: ' || res::text end);
   reset role;
 

@@ -20,7 +20,7 @@ declare
   r jsonb := '{}'::jsonb; n int; n2 int; fails int; st text; st2 text; q0 bigint; q1 bigint; names text[];
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  own_rule text; real_objects int; other_id uuid; st3 text; st4 text; st5 text; copy_id uuid;
+  own_rule text; real_objects int; other_id uuid; st3 text; st4 text; st5 text; copy_id uuid; ao uuid; xa uuid; st6 text; st7 text; st8 text;
 begin
   select count(*) into real_objects from storage.objects where bucket_id = 'project-assets';
   insert into storage.objects (bucket_id, name, metadata) values
@@ -28,6 +28,8 @@ begin
     ('project-assets', 'qa-sb627/other.png', '{"mimetype":"image/png"}');
   insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', o);
   insert into public.image_assets (storage_path, user_id) values ('qa-sb627/other.png', x) returning id into other_id;
+  insert into public.articles (user_id, title, status) values (o, 'qa-sb627 O', 'draft') returning id into ao;
+  insert into public.articles (user_id, title, status) values (x, 'qa-sb627 X', 'draft') returning id into xa;
 
   -- TC-SB627-01: anon writes nothing.
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -101,6 +103,13 @@ begin
   exception when others then st4 := sqlstate; end;
   begin update public.image_assets set storage_path = 'qa-sb627/other.png' where id = copy_id; st5 := 'updated';
   exception when others then st5 := sqlstate; end;
+  -- verifier 2026-10-26: a row may be attached only to your own article (INSERT and UPDATE)
+  begin insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb627/own.png', o, xa, 'accepted'); st6 := 'inserted';
+  exception when others then st6 := sqlstate; end;
+  begin update public.image_assets set article_id = xa where id = copy_id; st7 := 'updated';
+  exception when others then st7 := sqlstate; end;
+  begin update public.image_assets set article_id = ao where id = copy_id; get diagnostics n = row_count; st8 := 'updated';
+  exception when others then st8 := sqlstate; end;
   select array_agg(name order by name) into names from storage.objects where bucket_id = 'project-assets' and name like 'qa-sb627/%';
   reset role;
   r := r || jsonb_build_object('TC-SB643-02.copy_of_own_row', case when st = 'inserted' and copy_id is not null then 'pass' else 'FAIL: ' || st end);
@@ -108,6 +117,9 @@ begin
   r := r || jsonb_build_object('TC-SB643-02.no_row_for_other_users_path', case when st3 = '42501' then 'pass' else 'FAIL: ' || st3 end);
   r := r || jsonb_build_object('TC-SB643-02.no_copy_for_another_user', case when st4 = '42501' then 'pass' else 'FAIL: ' || st4 end);
   r := r || jsonb_build_object('TC-SB643-02.copy_path_still_fixed', case when st5 = '42501' then 'pass' else 'FAIL: ' || st5 end);
+  r := r || jsonb_build_object('TC-SB643-02.no_insert_onto_other_users_article', case when st6 = '42501' then 'pass' else 'FAIL: ' || st6 end);
+  r := r || jsonb_build_object('TC-SB643-02.no_move_onto_other_users_article', case when st7 = '42501' then 'pass' else 'FAIL: ' || st7 end);
+  r := r || jsonb_build_object('TC-SB643-02.own_article_still_works', case when st8 = 'updated' and n = 1 then 'pass' else 'FAIL: ' || st8 || ', ' || coalesce(n, 0) end);
   r := r || jsonb_build_object('TC-SB643-02.owner_still_sees_own_only',
          case when names = array['qa-sb627/own.png'] then 'pass' else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') end);
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);

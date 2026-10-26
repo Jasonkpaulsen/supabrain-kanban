@@ -58,16 +58,17 @@ test("image_assets paths stay service-role only", () => {
   assert.match(sql, /create\s+trigger\s+trg_image_asset_path_service_only\s+before\s+insert\s+or\s+update\s+on\s+public\.image_assets/i);
   assert.match(sql, /current_user\s+in\s+\('anon',\s*'authenticated'\)/i);
   // SB-643 (2026-10-26) lets a signed-in user add a row for a file they already have a row for (a
-  // header copy); the SB-627 suite re-ran with TC-SB643-02 (23 checks). Any other change trips this.
-  const REVIEWED = ["20261026015944"];
+  // header copy), and 20261026021942 refuses attaching a row to another user's article; the SB-627
+  // suite re-ran with TC-SB643-02 (26 checks). Any other change trips this.
+  const REVIEWED = ["20261026015944", "20261026021942"];
   const later = files.filter((x) => x.slice(0, 14) > "20261024172958")
     .filter((x) => /trg_image_asset_path_service_only|enforce_image_asset_path_service_only/i.test(code(x)));
   assert.deepEqual(later.map((x) => x.slice(0, 14)).filter((v) => !REVIEWED.includes(v)), [],
     "a later migration touches the image_assets path guard; re-run the SB-627 suite and update this test");
 });
 
-test("SB-643: the path guard allows only a copy of the caller's own row", () => {
-  const f = files.find((x) => x.startsWith("20261026015944"));
+test("SB-643: the path guard allows only a copy of the caller's own row, on the caller's own article", () => {
+  const f = files.find((x) => x.startsWith("20261026021942"));
   assert.ok(f, "the SB-643 migration is missing");
   const sql = code(f);
   const fn = sql.match(/create\s+or\s+replace\s+function\s+public\.enforce_image_asset_path_service_only\(\)[\s\S]*?\$function\$[\s\S]*?\$function\$/i)?.[0] ?? "";
@@ -78,6 +79,8 @@ test("SB-643: the path guard allows only a copy of the caller's own row", () => 
   assert.match(fn, /ia\.user_id\s*=\s*\(select auth\.uid\(\)\)\s+and\s+new\.user_id\s*=\s*\(select auth\.uid\(\)\)/i);
   assert.match(fn, /new\.storage_path\s+is\s+distinct\s+from\s+old\.storage_path\s+or\s+new\.storage_bucket\s+is\s+distinct\s+from\s+old\.storage_bucket/i,
     "path and bucket changes stay service-role only");
+  assert.match(fn, /new\.article_id\s+is\s+not\s+null\s+and\s+\(tg_op\s*=\s*'INSERT'\s+or\s+new\.article_id\s+is\s+distinct\s+from\s+old\.article_id\)/i);
+  assert.match(fn, /a\.id\s*=\s*new\.article_id\s+and\s+a\.user_id\s*=\s*\(select auth\.uid\(\)\)/i, "only your own article");
 });
 
 // The path guard trusts current_user, so a SECURITY DEFINER function that writes image_assets
