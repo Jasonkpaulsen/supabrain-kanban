@@ -202,6 +202,23 @@ test("TC-SB633-01: a file shared with a surviving library row is not removed", a
   assert.deepEqual(ids(calls.log, "article"), ["a1", "a2"]);
 });
 
+test("TC-SB643-03: a replaced header copy is purged; the library image keeps its file", async () => {
+  // SB-643: set_article_header copies a library image; the copy becomes rejected when replaced.
+  const w = world({ articles: [] });
+  w.images = [
+    { id: "lib", storage_path: "lce-images/library/pic.png", status: "saved", article_id: null, user_id: "u" },
+    { id: "copy", storage_path: "lce-images/library/pic.png", status: "rejected", article_id: "a9", user_id: "u" },
+  ];
+  w.files = new Set(["lce-images/library/pic.png"]);
+  const { io, calls } = fake(w);
+  const s = await runCleanup(io, { graceDays: 30, now: NOW });
+  assert.deepEqual(calls.removed.flat(), [], "the library image's file must stay");
+  assert.ok(w.files.has("lce-images/library/pic.png"));
+  assert.deepEqual(calls.deleted.images.flat(), ["copy"]);
+  assert.deepEqual(ids(calls.log, "image"), ["copy"]);
+  assert.equal(s.shared_files, 1);
+});
+
 test("a failed shared-path lookup removes no file and deletes only file-less rows", async () => {
   const w = world({ inUseError: "lookup down" });
   const { io, calls } = fake(w);

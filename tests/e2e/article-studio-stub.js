@@ -111,12 +111,27 @@ async function openStudio(page, { removes = () => true, storageStatus = 200, sto
     const args = JSON.parse(req.postData() || '{}');
     calls.rpc.push(args);
     if (rpcError) return r.fulfill({ status: 400, headers: CORS, contentType: 'application/json', body: JSON.stringify({ message: rpcError }) });
-    let demoted = 0;
-    db.images.forEach((i) => { if (i.article_id === args.p_article_id && i.status === 'accepted' && i.id !== args.p_image_id) { i.status = 'saved'; demoted += 1; } });
+    // SB-643: a saved/library image is copied (a new accepted row on the same file); a replaced
+    // copy is rejected rather than saved. Anything else moves, as before.
+    const ok = (o) => r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ ok: true, detached: 0, ...o }) });
     const img = db.images.find((i) => i.id === args.p_image_id);
-    img.status = 'accepted'; img.article_id = args.p_article_id;
-    db.articles.find((a) => a.id === args.p_article_id).image_asset_id = args.p_image_id;
-    return r.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ ok: true, demoted, detached: 0 }) });
+    const art = db.articles.find((a) => a.id === args.p_article_id);
+    const isLibrary = ['saved', 'library'].includes(img.status);
+    if (isLibrary) {
+      const have = db.images.find((i) => i.article_id === art.id && i.status === 'accepted' && i.copied_from === img.id);
+      if (have) return ok({ image_id: have.id, copied_from: img.id, demoted: 0 });
+    }
+    let demoted = 0;
+    db.images.forEach((i) => { if (i.article_id === art.id && i.status === 'accepted' && i.id !== img.id) { i.status = i.copied_from ? 'rejected' : 'saved'; demoted += 1; } });
+    let target = img;
+    if (isLibrary) {
+      target = { ...img, id: `copy-${calls.rpc.length}`, article_id: art.id, status: 'accepted', sort_order: 0, copied_from: img.id };
+      db.images.push(target);
+    } else {
+      img.status = 'accepted'; img.article_id = art.id;
+    }
+    art.image_asset_id = target.id;
+    return ok({ image_id: target.id, copied_from: isLibrary ? img.id : null, demoted });
   });
   // SB-634 (verifier): PostgREST returns written rows only for Prefer: return=representation, which
   // supabase-js sends when the write is followed by .select(). Without it the answer has no body

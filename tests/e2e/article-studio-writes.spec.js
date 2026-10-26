@@ -7,7 +7,7 @@
 //
 // Stubbed backend (article-studio-stub.js); options make a write match nothing or fail.
 const { test, expect } = require('@playwright/test');
-const { openStudio, toast, deletesOf, openTrashedArticle, A1, EXPECTED_HTTP } = require('./article-studio-stub');
+const { openStudio, toast, deletesOf, deleteLibraryImage, openTrashedArticle, A1, EXPECTED_HTTP } = require('./article-studio-stub');
 
 const NOT_SAVED = 'Not saved — this article changed or is no longer yours';
 const now = new Date().toISOString();
@@ -313,6 +313,51 @@ test.describe('@sb634 @sb636 Article Studio writes', () => {
     await expect(toast(page)).toHaveText('Set as header');
     expect(calls.rpc).toEqual([{ p_article_id: A1, p_image_id: 'lib1' }]);
     expect(calls.patches).toEqual([]);
+  });
+
+  // SB-643: a library image used as a header is copied; the library keeps it, and its file.
+  async function useSaved(page, description) {
+    await page.locator('button:has-text("Use saved")').click();
+    await page.locator('#libPick .imgcard', { hasText: description }).locator('img').click();
+    await expect(toast(page)).toHaveText('Set as header');
+  }
+  const LIB1 = 'lce-images/library/saved-1.png';
+
+  test('TC-SB643-03a Use saved leaves the image in the library', async ({ page }) => {
+    const { db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await useSaved(page, 'img lib1');
+    await expect(page.locator('#imgZone .hero img')).toHaveAttribute('src', `https://x.test/${LIB1}`);
+    const lib1 = db.images.find((i) => i.id === 'lib1');
+    expect([lib1.status, lib1.article_id]).toEqual(['saved', null]);
+    expect(db.images.filter((i) => i.storage_path === LIB1).map((i) => [i.status, i.article_id])).toEqual([['saved', null], ['accepted', A1]]);
+    await page.evaluate(() => closeSheet());
+    await page.click('#n-lib');
+    await expect(page.locator('#libGrid .card', { hasText: 'img lib1' })).toBeVisible();
+  });
+
+  test('TC-SB643-03b removing an article whose header is a copy keeps the library image and its file', async ({ page }) => {
+    const { calls, db, errors } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await useSaved(page, 'img lib1');
+    await page.locator('#sheetActions button:has-text("Delete")').click();
+    await expect(toast(page)).toHaveText('Deleted');
+    expect(calls.storage.flat()).not.toContain(LIB1);
+    expect(db.files.has(LIB1)).toBe(true);
+    expect(db.images.filter((i) => i.storage_path === LIB1).map((i) => i.id)).toEqual(['lib1']);
+    expect(errors.filter((e) => !EXPECTED_HTTP.test(e))).toEqual([]);
+  });
+
+  test('TC-SB643-03c deleting a library image whose copy is a header keeps the file', async ({ page }) => {
+    const { calls, db } = await openStudio(page);
+    await openTrashedArticle(page, 'Trashed one');
+    await useSaved(page, 'img lib1');
+    await page.evaluate(() => closeSheet());
+    await deleteLibraryImage(page, 'img lib1');
+    await expect(page.locator('#libGrid .card', { hasText: 'img lib1' })).toHaveCount(0);
+    expect(calls.storage.flat()).not.toContain(LIB1);
+    expect(db.files.has(LIB1)).toBe(true);
+    expect(db.images.filter((i) => i.storage_path === LIB1).map((i) => [i.status, i.article_id])).toEqual([['accepted', A1]]);
   });
 
   test('TC-SB636-03a Reject with the sheet closed meanwhile does not throw', async ({ page }) => {

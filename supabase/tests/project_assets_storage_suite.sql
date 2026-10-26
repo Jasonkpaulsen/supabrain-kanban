@@ -1,4 +1,4 @@
--- project-assets storage suite: TC-SB627-01 .. TC-SB627-05 (SB-627).
+-- project-assets storage suite: TC-SB627-01 .. TC-SB627-05 (SB-627), TC-SB643-02 (SB-643).
 --
 -- Run as postgres. One transaction that always ends by raising, so the fixture objects, the
 -- image_assets rows and the analyze-image requests their uploads queue do not survive. Pass =
@@ -12,14 +12,15 @@
 --
 -- Fixture: two objects under qa-sb627/, each with an image_assets row: own.png belongs to O,
 -- other.png to X. TC-SB627-05 (verifier, 2026-10-24): X cannot forge an image_assets row, or
--- move their own row's path, to reach O's file.
+-- move their own row's path, to reach O's file. TC-SB643-02: O may add a row for a file O already
+-- has a row for (a header copy), and nothing else.
 
 do $suite$
 declare
   r jsonb := '{}'::jsonb; n int; n2 int; fails int; st text; st2 text; q0 bigint; q1 bigint; names text[];
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  own_rule text; real_objects int; other_id uuid; st3 text;
+  own_rule text; real_objects int; other_id uuid; st3 text; st4 text; st5 text; copy_id uuid;
 begin
   select count(*) into real_objects from storage.objects where bucket_id = 'project-assets';
   insert into storage.objects (bucket_id, name, metadata) values
@@ -86,6 +87,35 @@ begin
   r := r || jsonb_build_object('TC-SB627-05.status_edit_still_works', case when st3 = 'updated' and n = 1 then 'pass' else 'FAIL: ' || st3 || ', ' || coalesce(n, 0) end);
   r := r || jsonb_build_object('TC-SB627-05.other_file_still_hidden',
          case when names = array['qa-sb627/other.png'] then 'pass' else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') end);
+
+  -- TC-SB643-02: a copy of your own image row is allowed; nothing else is.
+  perform set_config('request.jwt.claims', json_build_object('sub', o, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin insert into public.image_assets (storage_path, user_id, status) values ('qa-sb627/own.png', o, 'accepted') returning id into copy_id; st := 'inserted';
+  exception when others then st := sqlstate; end;
+  begin insert into public.image_assets (storage_path, user_id) values ('qa-sb627/new.png', o); st2 := 'inserted';
+  exception when others then st2 := sqlstate; end;
+  begin insert into public.image_assets (storage_path, user_id) values ('qa-sb627/other.png', o); st3 := 'inserted';
+  exception when others then st3 := sqlstate; end;
+  begin insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', x); st4 := 'inserted';
+  exception when others then st4 := sqlstate; end;
+  begin update public.image_assets set storage_path = 'qa-sb627/other.png' where id = copy_id; st5 := 'updated';
+  exception when others then st5 := sqlstate; end;
+  select array_agg(name order by name) into names from storage.objects where bucket_id = 'project-assets' and name like 'qa-sb627/%';
+  reset role;
+  r := r || jsonb_build_object('TC-SB643-02.copy_of_own_row', case when st = 'inserted' and copy_id is not null then 'pass' else 'FAIL: ' || st end);
+  r := r || jsonb_build_object('TC-SB643-02.no_row_for_new_path', case when st2 = '42501' then 'pass' else 'FAIL: ' || st2 end);
+  r := r || jsonb_build_object('TC-SB643-02.no_row_for_other_users_path', case when st3 = '42501' then 'pass' else 'FAIL: ' || st3 end);
+  r := r || jsonb_build_object('TC-SB643-02.no_copy_for_another_user', case when st4 = '42501' then 'pass' else 'FAIL: ' || st4 end);
+  r := r || jsonb_build_object('TC-SB643-02.copy_path_still_fixed', case when st5 = '42501' then 'pass' else 'FAIL: ' || st5 end);
+  r := r || jsonb_build_object('TC-SB643-02.owner_still_sees_own_only',
+         case when names = array['qa-sb627/own.png'] then 'pass' else 'FAIL: ' || coalesce(array_to_string(names, ','), 'none') end);
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  set local role anon;
+  begin insert into public.image_assets (storage_path, user_id) values ('qa-sb627/own.png', o); st := 'inserted';
+  exception when others then st := sqlstate; end;
+  reset role;
+  r := r || jsonb_build_object('TC-SB643-02.anon_refused', case when st = '42501' then 'pass' else 'FAIL: ' || st end);
 
   -- TC-SB627-03: the service role still uploads and updates, and an image upload still queues analysis.
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);

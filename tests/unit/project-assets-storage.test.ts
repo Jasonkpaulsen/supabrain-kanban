@@ -57,9 +57,27 @@ test("image_assets paths stay service-role only", () => {
   const sql = code(f);
   assert.match(sql, /create\s+trigger\s+trg_image_asset_path_service_only\s+before\s+insert\s+or\s+update\s+on\s+public\.image_assets/i);
   assert.match(sql, /current_user\s+in\s+\('anon',\s*'authenticated'\)/i);
+  // SB-643 (2026-10-26) lets a signed-in user add a row for a file they already have a row for (a
+  // header copy); the SB-627 suite re-ran with TC-SB643-02 (23 checks). Any other change trips this.
+  const REVIEWED = ["20261026015944"];
   const later = files.filter((x) => x.slice(0, 14) > "20261024172958")
     .filter((x) => /trg_image_asset_path_service_only|enforce_image_asset_path_service_only/i.test(code(x)));
-  assert.deepEqual(later, [], "a later migration touches the image_assets path guard; re-run the SB-627 suite and update this test");
+  assert.deepEqual(later.map((x) => x.slice(0, 14)).filter((v) => !REVIEWED.includes(v)), [],
+    "a later migration touches the image_assets path guard; re-run the SB-627 suite and update this test");
+});
+
+test("SB-643: the path guard allows only a copy of the caller's own row", () => {
+  const f = files.find((x) => x.startsWith("20261026015944"));
+  assert.ok(f, "the SB-643 migration is missing");
+  const sql = code(f);
+  const fn = sql.match(/create\s+or\s+replace\s+function\s+public\.enforce_image_asset_path_service_only\(\)[\s\S]*?\$function\$[\s\S]*?\$function\$/i)?.[0] ?? "";
+  assert.ok(fn, "SB-643 redefines the path guard");
+  assert.doesNotMatch(fn.split(/\$function\$/)[0], /security\s+definer/i, "the guard must stay invoker so its lookup runs under the caller's RLS");
+  assert.match(fn, /current_user\s*=\s*'anon'\s+or\s+not\s+exists/i, "anon stays refused");
+  assert.match(fn, /ia\.storage_bucket\s*=\s*new\.storage_bucket\s+and\s+ia\.storage_path\s*=\s*new\.storage_path/i);
+  assert.match(fn, /ia\.user_id\s*=\s*\(select auth\.uid\(\)\)\s+and\s+new\.user_id\s*=\s*\(select auth\.uid\(\)\)/i);
+  assert.match(fn, /new\.storage_path\s+is\s+distinct\s+from\s+old\.storage_path\s+or\s+new\.storage_bucket\s+is\s+distinct\s+from\s+old\.storage_bucket/i,
+    "path and bucket changes stay service-role only");
 });
 
 // The path guard trusts current_user, so a SECURITY DEFINER function that writes image_assets

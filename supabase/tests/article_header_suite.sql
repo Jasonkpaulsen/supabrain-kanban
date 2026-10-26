@@ -1,4 +1,4 @@
--- Article header suite: TC-SB636-01 (SB-636).
+-- Article header suite: TC-SB636-01 (SB-636), TC-SB643-01 (SB-643: library images are copied).
 --
 -- Run as postgres. One transaction that always ends by raising, so the fixture articles and
 -- images do not survive. Pass = the raised message starts with "ARTICLE_HEADER PASS". The message
@@ -6,20 +6,21 @@
 --
 -- Fixture: O owns article A with an accepted header h0, a candidate c1 and a saved library image
 -- lib; X owns article B and image xi. O's article A2 has header m (TC-SB636-01.move_detaches, verifier
--- 2026-10-25: moving m to A clears A2's pointer).
+-- 2026-10-25: moving m to A clears A2's pointer). lib2 is a 'library'-status image (SB-643).
 
 do $suite$
 declare
   r jsonb := '{}'::jsonb; fails int; st text; res jsonb;
   o constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   x constant uuid := '5ebab8fc-e993-4aee-bbc1-eb8ff08a2e0e';
-  a uuid; b uuid; a2 uuid; h0 uuid; c1 uuid; lib uuid; xi uuid; m uuid; snap text;
+  a uuid; b uuid; a2 uuid; h0 uuid; c1 uuid; lib uuid; lib2 uuid; xi uuid; m uuid; snap text; cp uuid; cp2 uuid;
 begin
   insert into public.articles (user_id, title, status) values (o, 'qa-sb636 A', 'draft') returning id into a;
   insert into public.articles (user_id, title, status) values (x, 'qa-sb636 B', 'draft') returning id into b;
   insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/h0.png', o, a, 'accepted') returning id into h0;
   insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/c1.png', o, a, 'candidate') returning id into c1;
-  insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/lib.png', o, null, 'saved') returning id into lib;
+  insert into public.image_assets (storage_path, user_id, article_id, status, description) values ('qa-sb636/lib.png', o, null, 'saved', 'qa lib') returning id into lib;
+  insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/lib2.png', o, null, 'library') returning id into lib2;
   insert into public.image_assets (storage_path, user_id, article_id, status) values ('qa-sb636/xi.png', x, b, 'candidate') returning id into xi;
   update public.articles set image_asset_id = h0 where id = a;
   insert into public.articles (user_id, title, status) values (o, 'qa-sb636 A2', 'draft') returning id into a2;
@@ -36,12 +37,16 @@ begin
                    and (select status from public.image_assets where id = c1) = 'accepted'
                    and (select image_asset_id from public.articles where id = a) = c1
               then 'pass' else 'FAIL: ' || res::text end);
-  -- reuse a library image: it moves to the article as its header
+  -- SB-643: reuse a library image: the article gets a copy; the library row is untouched
   res := public.set_article_header(a, lib);
-  r := r || jsonb_build_object('TC-SB636-01.use_library_image',
-         case when (select status || ':' || coalesce(article_id::text, '') from public.image_assets where id = lib) = 'accepted:' || a
+  cp := (res->>'image_id')::uuid;
+  r := r || jsonb_build_object('TC-SB643-01.library_image_copied',
+         case when cp is not null and cp <> lib and (res->>'copied_from')::uuid = lib
+                   and (select status || ':' || coalesce(article_id::text, '') from public.image_assets where id = lib) = 'saved:'
+                   and (select status || ':' || article_id || ':' || storage_path || ':' || (meta->>'copied_from') || ':' || description || ':' || user_id
+                          from public.image_assets where id = cp) = 'accepted:' || a || ':qa-sb636/lib.png:' || lib || ':qa lib:' || o
                    and (select status from public.image_assets where id = c1) = 'saved'
-                   and (select image_asset_id from public.articles where id = a) = lib
+                   and (select image_asset_id from public.articles where id = a) = cp
                    and (select count(*) from public.image_assets where article_id = a and status = 'accepted') = 1
               then 'pass' else 'FAIL: ' || res::text end);
   snap := (select string_agg(id || status || coalesce(article_id::text, ''), ',' order by id) from public.image_assets where storage_path like 'qa-sb636/%')
@@ -57,10 +62,10 @@ begin
          case when snap = (select string_agg(id || status || coalesce(article_id::text, ''), ',' order by id) from public.image_assets where storage_path like 'qa-sb636/%')
                           || (select image_asset_id::text from public.articles where id = a)
               then 'pass' else 'FAIL' end);
-  -- the image that is already the header: nothing demoted or detached, nothing changes
+  -- the library image whose copy is already the header: no second copy, nothing changes
   res := public.set_article_header(a, lib);
   r := r || jsonb_build_object('TC-SB636-01.same_image_noop',
-         case when (res->>'demoted')::int = 0 and (res->>'detached')::int = 0
+         case when (res->>'demoted')::int = 0 and (res->>'detached')::int = 0 and (res->>'image_id')::uuid = cp
                    and snap = (select string_agg(id || status || coalesce(article_id::text, ''), ',' order by id) from public.image_assets where storage_path like 'qa-sb636/%')
                               || (select image_asset_id::text from public.articles where id = a)
               then 'pass' else 'FAIL: ' || res::text end);
@@ -71,6 +76,27 @@ begin
                    and (select image_asset_id from public.articles where id = a2) is null
                    and (select image_asset_id from public.articles where id = a) = m
                    and (select status || ':' || article_id from public.image_assets where id = m) = 'accepted:' || a
+                   and (select count(*) from public.image_assets where article_id = a and status = 'accepted') = 1
+              then 'pass' else 'FAIL: ' || res::text end);
+  -- SB-643: the replaced header was a copy: it is rejected, not returned to the library
+  r := r || jsonb_build_object('TC-SB643-01.replaced_copy_rejected',
+         case when (select status from public.image_assets where id = cp) = 'rejected'
+                   and (select status from public.image_assets where id = lib) = 'saved'
+                   and (select count(*) from public.image_assets where storage_path = 'qa-sb636/lib.png' and status in ('saved', 'library')) = 1
+              then 'pass' else 'FAIL' end);
+  -- SB-643: a 'library'-status image is copied too; using the library image again after its copy
+  -- was replaced makes a fresh copy
+  res := public.set_article_header(a, lib2);
+  cp2 := (res->>'image_id')::uuid;
+  r := r || jsonb_build_object('TC-SB643-01.library_status_copied',
+         case when cp2 <> lib2 and (select status || ':' || coalesce(article_id::text, '') from public.image_assets where id = lib2) = 'library:'
+                   and (select image_asset_id from public.articles where id = a) = cp2
+                   and (select status from public.image_assets where id = m) = 'saved'
+              then 'pass' else 'FAIL: ' || res::text end);
+  res := public.set_article_header(a, lib);
+  r := r || jsonb_build_object('TC-SB643-01.reuse_after_replace_copies_again',
+         case when (res->>'image_id')::uuid not in (cp, lib) and (select status from public.image_assets where id = cp2) = 'rejected'
+                   and (select count(*) from public.image_assets where meta->>'copied_from' = lib::text) = 2
                    and (select count(*) from public.image_assets where article_id = a and status = 'accepted') = 1
               then 'pass' else 'FAIL: ' || res::text end);
   reset role;
