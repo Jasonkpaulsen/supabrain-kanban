@@ -1,4 +1,4 @@
--- SB-644 (ADR-GOV-001-A2): L0/L1 tickets never wait on Jason. TC-SB644-01, -02, -04.
+-- SB-644 (ADR-GOV-001-A2): L0/L1 tickets never wait on Jason. TC-SB644-01, -02, -04, -05.
 --
 -- Run as postgres. One transaction that always ends by raising, so no fixture survives.
 -- Pass = the raised message starts with "GOVERNANCE_AWAITING PASS". Fixtures use ticket codes
@@ -12,7 +12,7 @@ declare
   ub constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   sb uuid; r jsonb := '{}'::jsonb; fails int; st text;
   t1 uuid; t2 uuid; t3 uuid; legacy uuid; a2 uuid; a3 uuid; a4 uuid; d2 uuid; d3 uuid; d4 uuid; nl uuid;
-  s2 uuid; u1 uuid; u2 uuid; rj uuid; rn uuid; s1 text; s3 text;
+  s2 uuid; u1 uuid; u2 uuid; rj uuid; rn uuid; s1 text; s3 text; e1 uuid; e2 uuid; e3 uuid;
 begin
   select id into sb from public.projects where project_key = 'SB';
   execute $f$create function pg_temp.t(q text) returns text language plpgsql as $b$
@@ -136,6 +136,30 @@ begin
   s3 := pg_temp.t(format($q$update public.work_items set status = 'awaiting_jason', meta = coalesce(meta, '{}') || '{"reopened_by":"Jason"}' where id = %L$q$, rn));
   r := r || jsonb_build_object('TC-SB644-04.other_rejected_reopens_unchanged',
          case when s1 = 'CANCEL-005' and s3 = 'ok' then 'pass' else 'FAIL: ' || s1 || '/' || s3 end);
+
+  -- TC-SB644-05 (re-verification of 20261026040133)
+  e1 := pg_temp.mk('ZZG-40', 2, 'todo');
+  update public.work_items set approval_status = 'approved', approved_by = 'Jason Paulsen' where id = e1;
+  update public.work_items set status = 'awaiting_jason', approval_status = 'pending' where id = e1;
+  r := r || jsonb_build_object('TC-SB644-05.audit_keeps_the_actor',
+         case when (select decided_by from public.governance_audit where work_item_id = e1 and decision = 'un_approve' order by created_at desc limit 1) = 'Jason Paulsen'
+                   and (select decided_by from public.governance_audit where work_item_id = e1 and decision = 'escalated' order by created_at desc limit 1) = 'jason'
+              then 'pass' else 'FAIL' end);
+  e2 := pg_temp.mk('ZZG-41', 3, 'backlog');
+  update public.work_items set status = 'cancelled', cancel_reason = 'rejected_by_jason', cancel_note = 'qa: not wanted', cancelled_by = 'Jason' where id = e2;
+  s1 := pg_temp.t(format($q$update public.work_items set status = 'backlog', authority_level = 1, meta = coalesce(meta, '{}') || '{"reopened_by":"Jason"}' where id = %L$q$, e2));
+  e3 := pg_temp.mk('ZZG-42', 3, 'backlog');
+  s3 := pg_temp.t(format($q$update public.work_items set status = 'cancelled', authority_level = 1, cancel_reason = 'wont_do', cancel_note = 'qa: drop', cancelled_by = 'Family PM' where id = %L$q$, e3));
+  r := r || jsonb_build_object('TC-SB644-05.lowering_the_level_does_not_help',
+         case when s1 = 'CANCEL-005' and s3 like 'P0001: CANCEL-003%' and (select status from public.work_items where id = e2) = 'cancelled'
+              then 'pass' else 'FAIL: ' || s1 || '/' || s3 end);
+  e3 := pg_temp.mk('ZZG-43', 1, 'todo');
+  update public.work_items set status = 'cancelled', cancel_reason = 'rejected_by_jason', cancel_note = 'qa: not wanted', cancelled_by = 'Jason' where id = e3;
+  update public.work_items set meta = coalesce(meta, '{}') || '{"reopened_by":"Jason"}' where id = e3;
+  s1 := (select coalesce(meta->>'reopened_by', 'none') from public.work_items where id = e3);
+  s3 := pg_temp.t(format($q$update public.work_items set status = 'todo' where id = %L$q$, e3));
+  r := r || jsonb_build_object('TC-SB644-05.stale_reopened_by_dropped',
+         case when s1 = 'none' and s3 = 'CANCEL-005-jason' then 'pass' else 'FAIL: ' || s1 || '/' || s3 end);
 
   select count(*) into fails from jsonb_each_text(r) where value <> 'pass';
   if fails = 0 then
