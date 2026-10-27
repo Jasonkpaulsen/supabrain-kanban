@@ -13,7 +13,7 @@ declare
   qa  constant text := 'SupaBrain QA';
   rb  constant text := '__sb607_rollback__';
   r jsonb := '{}'::jsonb;
-  u uuid; e uuid; p uuid; snap0 jsonb; t text[]; st text; msg text; k int; n int; fails int;
+  u uuid; e uuid; p uuid; snap0 jsonb; t text[]; st text; msg text; k int; n int; m int; fails int;
 begin
   execute $f$create function pg_temp.fx(p_code text, p_title text, p_status text, p_assignee text, p_meta jsonb)
     returns uuid language plpgsql as $b$
@@ -101,14 +101,24 @@ begin
            count(*)
       into n, k
       from esc where esc.blocker_class = 'human_decision' or coalesce(esc.authority_level, 0) >= 3;
+    -- no escalation is listed twice (as its own row and attached to another)
+    m := (select count(*) from public.vw_jason_decision_digest d, unnest(d.escalations_attached) x
+           where exists (select 1 from public.vw_jason_decision_digest d2 where d2.user_id = d.user_id and d2.ticket_code = x));
+    -- attach vs orphan on fixtures, not live tickets (live ones move: SB-520 lost its awaiting_jason subject
+    -- SB-413 on 2026-10-18). ZZH-41 escalates ZZH-40, which waits on Jason, so it is attached there;
+    -- ZZH-42 escalates a plain blocked ticket, so it is listed as its own row.
+    u := pg_temp.fx('ZZH-40', 'qa-sb607 waiting on Jason 4', 'awaiting_jason', null, null);
+    e := pg_temp.fx('ZZH-41', 'ESCALATION: qa-sb607 4 attached', 'todo', null, '{"upstream_ticket":"ZZH-40","flagged_for_jason":"true"}');
+    p := pg_temp.fx('ZZH-43', 'qa-sb607 upstream 4', 'blocked', null, null);
+    e := pg_temp.fx('ZZH-42', 'ESCALATION: qa-sb607 4 orphan', 'todo', null, '{"upstream_ticket":"ZZH-43","flagged_for_jason":"true"}');
     t := array[
-      (select count(*)::text from public.vw_jason_decision_digest where ticket_code in ('SB-549', '39P-027')),
-      (select count(*)::text from public.vw_jason_decision_digest where ticket_code in ('SB-520', 'SB-553')),
-      (select coalesce(string_agg(distinct x, ',' order by x), '') from public.vw_jason_decision_digest d, unnest(d.escalations_attached) x
-        where x in ('SB-520', 'SB-553'))];
+      coalesce((select array_to_string(escalations_attached, ',') from public.vw_jason_decision_digest where ticket_code = 'ZZH-40'), 'no row'),
+      (select count(*)::text from public.vw_jason_decision_digest where ticket_code = 'ZZH-41'),
+      coalesce((select string_agg(row_kind, ',') from public.vw_jason_decision_digest where ticket_code = 'ZZH-42'), 'no row')];
     r := r || jsonb_build_object('TC-SB607-4', case
-           when n = 0 and t = array['2', '0', 'SB-520,SB-553'] then 'pass'
-           else format('FAIL: missing %s of %s; orphans listed %s, attached listed as rows %s, attached %s', n, k, t[1], t[2], t[3]) end);
+           when n = 0 and m = 0 and t = array['ZZH-41', '0', 'orphan_escalation'] then 'pass'
+           else format('FAIL: missing %s of %s; listed twice %s; fixture attached %s, attached listed as row %s, orphan %s',
+                       n, k, m, t[1], t[2], t[3]) end);
     r := r || jsonb_build_object('TC-SB607-4.evidence', format('%s human-decision escalations, %s missing; digest rows %s',
                                    k, n, (select count(*) from public.vw_jason_decision_digest)));
   exception when others then
