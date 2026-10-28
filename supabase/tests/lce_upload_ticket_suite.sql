@@ -10,7 +10,7 @@ do $suite$
 declare
   ub constant uuid := '5ecbd44a-a3e2-4363-9133-dff3851ba0f5';
   r jsonb := '{}'::jsonb; fails int; st text; n int; ok boolean;
-  rq uuid; tix text[]; paths text[]; sets uuid[]; t1 text; t2 text; t3 text;
+  rq uuid; tix text[]; paths text[]; sets uuid[]; t1 text; t2 text; t3 text; role_name text; q text;
 begin
   execute $f$create or replace function pg_temp.t(q text) returns text language plpgsql as $b$
     begin execute q; return 'ok';
@@ -88,27 +88,36 @@ begin
          when public.lce_consume_upload_ticket(t3, paths[1]) is false and public.lce_upload_ticket_valid(t3)
          then 'pass' else 'FAIL' end);
 
-  -- TC-SB650-03: who can call what, tested as each role
-  execute 'set local role anon';
-  st := pg_temp.t(format('select * from public.lce_issue_upload_tickets(%L, 1)', rq)) || ','
-     || pg_temp.t(format('select public.lce_upload_ticket_valid(%L)', t3)) || ','
-     || pg_temp.t(format('select public.lce_consume_upload_ticket(%L, %L)', t3, paths[3])) || ','
-     || pg_temp.t('select count(*) from public.lce_upload_tickets');
-  execute 'reset role';
-  r := r || jsonb_build_object('TC-SB650-03.anon', case when st = '42501,42501,42501,42501' then 'pass' else 'FAIL: ' || st end);
-  execute 'set local role authenticated';
-  st := pg_temp.t(format('select * from public.lce_issue_upload_tickets(%L, 1)', rq)) || ','
-     || pg_temp.t(format('select public.lce_upload_ticket_valid(%L)', t3)) || ','
-     || pg_temp.t(format('select public.lce_consume_upload_ticket(%L, %L)', t3, paths[3])) || ','
-     || pg_temp.t('select count(*) from public.lce_upload_tickets');
-  execute 'reset role';
-  r := r || jsonb_build_object('TC-SB650-03.authenticated', case when st = '42501,42501,42501,42501' then 'pass' else 'FAIL: ' || st end);
-  -- the service role (the edge function) checks and uses, but cannot issue
-  execute 'set local role service_role';
-  st := pg_temp.t(format('select * from public.lce_issue_upload_tickets(%L, 1)', rq)) || ','
-     || pg_temp.t(format('select public.lce_upload_ticket_valid(%L)', t3));
-  execute 'reset role';
-  r := r || jsonb_build_object('TC-SB650-03.service_role', case when st = '42501,ok' then 'pass' else 'FAIL: ' || st end);
+  -- TC-SB650-03: who can call what, tested as each role. The calls are caught inline, not through
+  -- pg_temp.t: a function created by postgres grants no EXECUTE to client roles (SB-488), so the
+  -- helper itself would be refused before the call under test ran.
+  foreach role_name in array array['anon', 'authenticated', 'service_role'] loop
+    st := '';
+    execute format('set local role %I', role_name);
+    foreach q in array array[
+        format('select * from public.lce_issue_upload_tickets(%L, 1)', rq),
+        format('select public.lce_upload_ticket_valid(%L)', t3),
+        'select count(*) from public.lce_upload_tickets'] loop
+      begin
+        execute q; st := st || 'ok,';
+      exception when others then st := st || sqlstate || ',';
+      end;
+    end loop;
+    -- consume only for client roles: a successful consume by service_role would use up t3
+    if role_name <> 'service_role' then
+      begin
+        execute format('select public.lce_consume_upload_ticket(%L, %L)', t3, paths[3]); st := st || 'ok';
+      exception when others then st := st || sqlstate;
+      end;
+    end if;
+    execute 'reset role';
+    r := r || jsonb_build_object('TC-SB650-03.' || role_name, case
+           when role_name <> 'service_role' and st = '42501,42501,42501,42501' then 'pass'
+           -- the service role (the edge function) checks tickets but cannot issue them; it bypasses
+           -- RLS on the table, as it does everywhere
+           when role_name = 'service_role' and st = '42501,ok,ok,' then 'pass'
+           else 'FAIL: ' || st end);
+  end loop;
   -- the ticket used in the checks above is still live: no role's refused call consumed it
   r := r || jsonb_build_object('TC-SB650-03.refusals_consumed_nothing', case
          when public.lce_upload_ticket_valid(t3) then 'pass' else 'FAIL' end);
