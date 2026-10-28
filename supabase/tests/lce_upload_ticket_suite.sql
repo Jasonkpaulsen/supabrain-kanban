@@ -158,14 +158,18 @@ begin
   end loop;
   r := r || jsonb_build_object('TC-SB650-03.refusals_consumed_nothing', case
          when public.lce_upload_ticket_valid(t3) and public.lce_upload_ticket_valid(t4) is false then 'pass' else 'FAIL' end);
-  -- the functions keep SECURITY DEFINER and an empty search_path; the table keeps RLS with no policies
+  -- the functions keep SECURITY DEFINER and an empty search_path; the table keeps RLS
   r := r || jsonb_build_object('TC-SB650-03.definer_config', case
          when (select count(*) from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
                 where ns.nspname = 'public'
                   and p.proname in ('lce_issue_upload_tickets', 'lce_upload_ticket_valid', 'lce_consume_upload_ticket')
                   and p.prosecdef and p.proconfig = array['search_path=""']) = 3
               and (select relrowsecurity from pg_class where oid = 'public.lce_upload_tickets'::regclass)
-              and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'lce_upload_tickets')
+              -- the only policy is SB-595's restrictive oauth_client_deny (20261028135329)
+              and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'lce_upload_tickets') = 1
+              and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'lce_upload_tickets'
+                                 and (permissive <> 'RESTRICTIVE' or policyname <> 'oauth_client_deny'))
+              and not exists (select 1 from public.vw_oauth_client_coverage_gaps where table_name = 'lce_upload_tickets')
          then 'pass' else 'FAIL' end);
 
   -- TC-SB650-04: the static token is retired
