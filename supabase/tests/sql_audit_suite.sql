@@ -11,8 +11,13 @@
 -- child triggers fire at depth 1), TC-08 has no 50 ms floor and uses 10,000 rows, TC-02 forges as
 -- service_role and as postgres and checks the guard's own message, TC-01 checks enabled state,
 -- the transition table and the exact table list, and TC-11, TC-13 and TC-14 are added.
+--
+-- Revision 3 (passed 19/19, run by Jason in the SQL editor 2026-10-28): plain $$ quoting, and
+-- every DDL and TRUNCATE inside the block runs through EXECUTE with no semicolon in
+-- the string. The Supabase SQL editor splits scripts on statements it recognises (its new-table
+-- RLS check), which cut the DO block in half at the first DROP COLUMN.
 
-do $suite$
+do $$
 declare
   r jsonb := '{}'::jsonb; fails int; t0 timestamptz; d_base interval; d_trig interval;
   wid uuid; cid uuid; tid uuid; pid uuid := 'a07a7f3d-722f-468f-81fa-84e2c5fba704';
@@ -100,9 +105,9 @@ begin
          then 'pass' else 'FAIL' end);
 
   -- TC-SB652-04: DROP of a public object and DROP COLUMN are audited, by identity
-  create table public.qa_sb652_scratch (id int, extra text);
-  alter table public.qa_sb652_scratch drop column extra;
-  drop table public.qa_sb652_scratch;
+  execute 'create table public.qa_sb652_scratch (id int, extra text)';
+  execute 'alter table public.qa_sb652_scratch drop column extra';
+  execute 'drop table public.qa_sb652_scratch';
   r := r || jsonb_build_object('TC-SB652-04.drop_audited', case
          when (select count(*) from public.sql_audit_log where created_at = now() and operation = 'drop'
                 and object_name = 'public.qa_sb652_scratch' and object_type = 'table') = 1
@@ -127,16 +132,15 @@ begin
   r := r || jsonb_build_object('TC-SB652-06.no_delete', case when st = '42501' then 'pass' else 'FAIL:' || st end);
 
   -- TC-SB652-11: TRUNCATE is recorded, and TRUNCATE of the audit log is refused
-  create table public.qa_sb652_trunc (id int);
-  create trigger sql_audit_truncation after truncate on public.qa_sb652_trunc
-    for each statement execute function public.sql_audit_truncation();
-  insert into public.qa_sb652_trunc values (1), (2);
-  truncate public.qa_sb652_trunc;
+  execute 'create table public.qa_sb652_trunc (id int)';
+  execute 'create trigger sql_audit_truncation after truncate on public.qa_sb652_trunc for each statement execute function public.sql_audit_truncation()';
+  execute 'insert into public.qa_sb652_trunc values (1), (2)';
+  execute 'truncate public.qa_sb652_trunc';
   r := r || jsonb_build_object('TC-SB652-11.truncate_audited', case
          when (select count(*) from public.sql_audit_log where created_at = now() and operation = 'truncate'
                 and object_name = 'qa_sb652_trunc' and rows_affected is null) = 1
          then 'pass' else 'FAIL' end);
-  begin truncate public.sql_audit_log; st := 'ok';
+  begin execute 'truncate public.sql_audit_log'; st := 'ok';
   exception when others then st := sqlstate; end;
   r := r || jsonb_build_object('TC-SB652-11.audit_log_truncate_refused', case when st = '42501' then 'pass' else 'FAIL:' || st end);
 
@@ -172,12 +176,12 @@ begin
                 and object_name = 'work_item_comments' and rows_affected = 1
                 and db_role = 'authenticated' and auth_uid = ub) = 1
          then 'pass' else 'FAIL:' || st end);
-  create table public.qa_sb652_nest (id int);
-  create function public.qa_sb652_nest_fn() returns trigger language plpgsql set search_path to '' as $f$
-    begin delete from public.work_item_comments where body = 'qa-sb652 nested comment'; return null; end $f$;
-  create trigger qa_sb652_nest after insert on public.qa_sb652_nest
-    for each statement execute function public.qa_sb652_nest_fn();
-  insert into public.qa_sb652_nest values (1);
+  execute 'create table public.qa_sb652_nest (id int)';
+  execute format('create function public.qa_sb652_nest_fn() returns trigger language plpgsql set search_path to %L as %L', '',
+    'begin delete from public.work_item_comments where body = ' || quote_literal('qa-sb652 nested comment') || chr(59)
+    || ' return null' || chr(59) || ' end');
+  execute 'create trigger qa_sb652_nest after insert on public.qa_sb652_nest for each statement execute function public.qa_sb652_nest_fn()';
+  execute 'insert into public.qa_sb652_nest values (1)';
   r := r || jsonb_build_object('TC-SB652-14.nested', case
          when (select count(*) from public.sql_audit_log where created_at = now()
                 and object_name = 'work_item_comments' and trigger_depth = 2) = 1
@@ -190,11 +194,11 @@ begin
   select ub, cid, 'qa-sb652-base', 'pass', 'qa_initial', 'fixture' from generate_series(1, 10000);
   insert into public.test_runs (user_id, test_case_id, executed_by, result, phase, evidence)
   select ub, cid, 'qa-sb652-trig', 'pass', 'qa_initial', 'fixture' from generate_series(1, 10000);
-  alter table public.test_runs disable trigger sql_audit_row_removal;
+  execute 'alter table public.test_runs disable trigger sql_audit_row_removal';
   t0 := clock_timestamp();
   delete from public.test_runs where executed_by = 'qa-sb652-base';
   d_base := clock_timestamp() - t0;
-  alter table public.test_runs enable trigger sql_audit_row_removal;
+  execute 'alter table public.test_runs enable trigger sql_audit_row_removal';
   t0 := clock_timestamp();
   delete from public.test_runs where executed_by = 'qa-sb652-trig';
   d_trig := clock_timestamp() - t0;
@@ -210,4 +214,4 @@ begin
     raise exception 'SQL_AUDIT FAIL (% of % checks) %', fails, (select count(*) from jsonb_object_keys(r)) - 1, r;
   end if;
 end
-$suite$;
+$$;
