@@ -65,11 +65,12 @@ Deno.serve(async (req: Request) => {
     if (error || ok !== true) return new Response("forbidden", { status: 403 });
   }
 
+  // SB-650: the stored type is always image/png, whatever the caller sends. The bucket also
+  // accepts image/svg+xml, and a public SVG under a .png key would be scriptable content.
   const body = new Uint8Array(await req.arrayBuffer());
-  const ct = req.headers.get("content-type") || "image/png";
   const up = await fetch(target, {
     method: "POST",
-    headers: { "Authorization": "Bearer " + SR, "apikey": SR, "Content-Type": ct, "x-upsert": "false" },
+    headers: { "Authorization": "Bearer " + SR, "apikey": SR, "Content-Type": "image/png", "x-upsert": "false" },
     body,
   });
   const txt = await up.text();
