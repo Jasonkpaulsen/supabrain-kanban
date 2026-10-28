@@ -1,32 +1,37 @@
 // lce-image-ingest — upload a single object into the project-assets bucket.
 //
-// Invoked off-platform (no cron job and no database function calls it). Writes
-// with the SERVICE ROLE key and x-upsert:true at a caller-chosen path, so the
-// token is the only control on who can write or overwrite objects in that
-// bucket.
+// Called by the "Lce image request fulfiller" routine on Jason's Mac, which
+// generates header images and POSTs each PNG here. Writes with the SERVICE ROLE
+// key, so whatever authorises a request is the only control on who can write
+// into that bucket.
 //
-// SB-497 (2026-09-23): the expected token used to be a literal in this file.
-// That is the fifth instance of the class behind SB-408, SB-440, SB-447 and
-// SB-493, and the last one open. It has been rotated into Vault. This function
-// no longer holds it: it asks the database whether the presented token matches,
-// via public.lce_image_ingest_token_matches(), which is EXECUTE-granted to
-// service_role only and never returns the secret. Do not reintroduce a literal
-// here.
+// SB-650 (2026-10-28): authorisation is a one-time upload ticket, not a token.
+// The routine asks the database for tickets through the Supabase access it
+// already has (public.lce_issue_upload_tickets, called with execute_sql); each
+// ticket is bound to one object path, expires after 30 minutes and works once.
+// The database stores only its sha256. Nothing long-lived sits in the routine's
+// prompt or on the Mac any more -- SB-650 found the old static token written in
+// plaintext in that prompt, which is how every earlier instance of this class
+// started (SB-408, SB-440, SB-447, SB-493, SB-497).
 //
-// Unlike lce-cleanup there is deliberately no lce_image_ingest_headers()
-// helper: nothing inside the database calls this endpoint, so a jsonb helper
-// that returns the plaintext secret would have no caller to justify it. The
-// SB-497 migration asserts that it does not exist.
+// The SB-497 static token is no longer accepted at all: this function does not
+// read x-token. public.lce_image_ingest_token_matches() is left in place but
+// has no caller, and its Vault secret was overwritten with fresh random bytes
+// by the SB-650 migration, so no copy of any earlier value authenticates.
 //
-// SB-497 deliberately left the caller-supplied `path` alone, so that a
-// breakage could be attributed to the rotation or to path handling, not both.
+// Order matters, for the probe rule (never send a request where any path is
+// valid): the ticket is checked first WITHOUT being used, so an unauthorised
+// request is refused (403) before the path is looked at; a valid ticket with a
+// bad path is refused (400) and the ticket stays unused; only then is the
+// ticket consumed against the exact path it was issued for.
 //
-// SB-506 (2026-09-23): `path` used to be interpolated straight into the storage
-// URL, and URL parsing normalises ".." -- so "../avatars/x.png" escaped the
-// bucket, writing with the service-role key. It is now validated in path.ts by
-// two independent layers: an allowlist policy, and an invariant that the parsed
-// URL pathname is exactly the bucket prefix plus the path. See path.ts for why
-// they are separate, and path.test.ts for the proof.
+// SB-506 (2026-09-23): `path` is validated in path.ts by two independent
+// layers, an allowlist policy and an invariant that the parsed URL pathname is
+// exactly the bucket prefix plus the path. See path.ts and path.test.ts.
+//
+// x-upsert is false (SB-650): tickets are issued for fresh paths under a new
+// set id, so a legitimate upload never replaces an object, and a stolen ticket
+// cannot overwrite an existing one.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -39,10 +44,10 @@ Deno.serve(async (req: Request) => {
   const SR = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(SUPABASE_URL, SR);
 
-  // SB-497: validate against the Vault-held token without ever receiving its value.
+  // SB-650: a live, unused ticket, checked without using it.
+  const ticket = req.headers.get("x-upload-ticket") ?? "";
   {
-    const presented = req.headers.get("x-token") ?? "";
-    const { data: ok, error } = await sb.rpc("lce_image_ingest_token_matches", { p_token: presented });
+    const { data: ok, error } = await sb.rpc("lce_upload_ticket_valid", { p_ticket: ticket });
     if (error || ok !== true) return new Response("forbidden", { status: 403 });
   }
 
@@ -53,17 +58,25 @@ Deno.serve(async (req: Request) => {
   const path = check.path;
   const target = uploadTarget(SUPABASE_URL, path);
   if (!target) return new Response("invalid path", { status: 400 });
+
+  // SB-650: use the ticket, atomically, for exactly the path it was issued for.
+  {
+    const { data: ok, error } = await sb.rpc("lce_consume_upload_ticket", { p_ticket: ticket, p_path: path });
+    if (error || ok !== true) return new Response("forbidden", { status: 403 });
+  }
+
   const body = new Uint8Array(await req.arrayBuffer());
   const ct = req.headers.get("content-type") || "image/png";
   const up = await fetch(target, {
     method: "POST",
-    headers: { "Authorization": "Bearer " + SR, "apikey": SR, "Content-Type": ct, "x-upsert": "true" },
+    headers: { "Authorization": "Bearer " + SR, "apikey": SR, "Content-Type": ct, "x-upsert": "false" },
     body,
   });
   const txt = await up.text();
   return new Response(JSON.stringify({
+    ok: up.ok,
     status: up.status,
     resp: txt,
     public: `${SUPABASE_URL}/storage/v1/object/public/project-assets/${path}`,
-  }), { headers: { "content-type": "application/json" } });
+  }), { status: up.ok ? 200 : 502, headers: { "content-type": "application/json" } });
 });
