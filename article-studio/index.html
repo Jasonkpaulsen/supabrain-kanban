@@ -11,6 +11,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon.svg">
 <link rel="icon" href="./icon.svg">
+<script src="./config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
@@ -149,6 +150,7 @@
     <div style="display:flex;gap:8px">
       <button class="ref" onclick="openNewArticle()" style="color:var(--gold);font-size:18px;padding:7px 12px" title="New Article">＋</button>
       <button class="ref" onclick="load()">↻</button>
+      <button class="ref" id="signOut" onclick="doSignOut()" title="Sign out">⎋</button>
     </div>
   </header>
   <div class="app">
@@ -214,8 +216,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const SUPABASE_URL='https://hzqqvbvhnzmgqivfigej.supabase.co';
-const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cXF2YnZobnptZ3FpdmZpZ2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0ODgyMDAsImV4cCI6MjA5MDA2NDIwMH0.HDOqsE6Um5EKq-6cvySeo4iWUII92o05YE7gXZDYN_0';
+const SUPABASE_URL=window.SB_CONFIG.url;   // SB-182: see config.js
+const SUPABASE_KEY = window.SB_CONFIG.key;
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const STATUSES=['draft','in_review','needs_revision','approved','scheduled','published','trashed'];
 const LABELS={draft:'Draft',in_review:'In Review',needs_revision:'Revision',approved:'Approved',scheduled:'Scheduled',published:'Published',trashed:'Trash'};
@@ -240,17 +242,32 @@ async function doLogin(){
 }
 async function checkSession(){const {data}=await sb.auth.getSession();if(data.session){USER=data.session.user;showApp();}}
 function showApp(){document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';load();}
-window.addEventListener('online',()=>{document.getElementById('offline').style.display='none';load();});
+// SB-634: a lapsed or ended session returns to the login screen instead of leaving an empty list
+// (requests would run as anon, which RLS shows nothing). supabase-js emits SIGNED_OUT when a token
+// refresh fails as well as on sign-out.
+// SB-634 (re-verification): SESSION_GEN changes on every return to the login screen; a load that
+// started before it drops its result, so the previous user's data is never drawn again.
+let SESSION_GEN=0;
+function showLogin(msg){SESSION_GEN+=1;USER=null;ARTICLES=[];CURRENT=null;FILTER='all';['sheet','newSheet'].forEach(i=>{const e=document.getElementById(i);if(e)e.classList.remove('open');});['sheetBody','sheetTitle','sheetActions','list','libGrid','agenda','purgedList','stats','recs','tabs'].forEach(i=>{const e=document.getElementById(i);if(e)e.innerHTML='';});setView('board');document.getElementById('password').value='';document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex';document.getElementById('loginErr').textContent=msg||'';}
+// SB-634 (verifier): a session that cannot be checked because the network is down is not ended.
+const appShown=()=>document.getElementById('app').style.display!=='none';
+sb.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT')showLogin('Signed out — sign in again');});
+async function doSignOut(){await sb.auth.signOut();showLogin('');}
+window.addEventListener('online',()=>{document.getElementById('offline').style.display='none';if(appShown())load();});
 window.addEventListener('offline',()=>{document.getElementById('offline').style.display='block';});
 checkSession();
 
-async function load(){
-  const {data,error}=await sb.from('articles').select('*').order('updated_at',{ascending:false});
-  if(error){toast(error.message);return;}
+async function load(){const g=SESSION_GEN;
+  const {data:ses,error:se}=await sb.auth.getSession();if(g!==SESSION_GEN)return;if(se&&(!navigator.onLine||se.name==='AuthRetryableFetchError')){document.getElementById('offline').style.display='block';return;}if(!ses.session){showLogin('Session ended — sign in again');return;}
+  const {data,error}=await sb.from('articles').select('*').order('updated_at',{ascending:false});if(g!==SESSION_GEN)return;
+  if(error){toast(error.message);return;}document.getElementById('offline').style.display='none';
   ARTICLES=data||[];renderStats();renderRecs();renderTabs();renderList();
   if(VIEW==='cal')renderAgenda();if(VIEW==='lib')renderLibrary();if(VIEW==='purged')renderPurged();
 }
-async function patch(id,f){const {error}=await sb.from('articles').update(f).eq('id',id);if(error){toast('Save failed: '+error.message);return false;}return true;}
+// SB-634: a write is done only when the database returns the row. RLS filters a row it hides
+// without an error, so an update that matched nothing used to report success.
+const NOT_SAVED='Not saved — this article changed or is no longer yours';
+async function patch(id,f){const {data,error}=await sb.from('articles').update(f).eq('id',id).select('id');if(error){toast('Save failed: '+error.message);return false;}if(!data||!data.length){toast(NOT_SAVED);return false;}return true;}
 function countBy(s){return ARTICLES.filter(a=>a.status===s).length;}
 
 function renderStats(){
@@ -340,14 +357,24 @@ async function approveForWriting(id){const a=ARTICLES.find(x=>x.id===id);const f
 async function backToDraft(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',approved_by:null,approved_at:null,scheduled_for:null,publish_slot_label:null,feedback_history:pushHist(a,'returned to draft','')})){toast('Returned to draft');closeSheet();load();}}
 async function trash(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'trashed',feedback_history:pushHist(a,'moved to trash','')})){toast('Moved to trash');closeSheet();load();}}
 async function restore(id){const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'draft',feedback_history:pushHist(a,'restored','')})){toast('Restored');closeSheet();load();}}
-async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').eq('article_id',id);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast('Deleted');closeSheet();load();}
+// SB-633: saved and library images are not part of an article's removal; article_id is ON DELETE
+// SET NULL, so they stay in the library when the article goes.
+// SB-631: an image row goes only when its file went. A removal that reported nothing kept the
+// file, so the article stays in Trash with those images and can be retried; removing it anyway
+// would strand them (article_id is ON DELETE SET NULL and the library shows only saved images).
+async function destroy(id){if(!confirm('Permanently delete this article?'))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket').eq('article_id',id).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const imgLog=imageLog(done,'manual_delete');if(kept.length){const lg=await logPurge(imgLog);toast(`${kept.length} file(s) not removed — article kept in Trash`+(lg?'':' (purge log not written)'));loadArticleImages(id);return;}const {data:gone,error}=await sb.from('articles').delete().eq('id',id).select('id');if(error||!gone||!gone.length){await logPurge(imgLog);toast(error?error.message:'Article not removed — it changed or is no longer yours');return;}const lg=await logPurge([...imgLog,{entity_type:'article',entity_id:id,title:CURRENT&&CURRENT.title,reason:'manual_delete'}]);toast(lg?'Deleted':'Deleted — purge log not written');closeSheet();load();}
 async function markPublished(id){const url=prompt('LinkedIn post URL (optional):','');const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'published',published_url:url||null,feedback_history:pushHist(a,'published',url||'')})){toast('Published');closeSheet();load();}}
-async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').in('article_id',ids);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().in('id',ids);if(error){toast(error.message);return;}await logPurge((arts||[]).map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));toast(`Purged ${ids.length}`);load();}
+async function emptyTrash(){const {data:arts,error:ae}=await sb.from('articles').select('id,title').eq('status','trashed');if(ae){toast(ae.message);return;}const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs,error:ie}=await sb.from('image_assets').select('id,storage_path,storage_bucket,article_id').in('article_id',ids).not('status','in','(saved,library)');if(ie){toast(ie.message);return;}const {kept,done,err}=await removeImages(imgs);if(err){toast('Images not removed: '+err);return;}const held=new Set(kept.map(i=>i.article_id));const go=(arts||[]).filter(a=>!held.has(a.id));let rows=imageLog(done,'manual_empty_trash');let purged=[];if(go.length){const {data:gone,error}=await sb.from('articles').delete().in('id',go.map(a=>a.id)).select('id');if(error){await logPurge(rows);toast(error.message);return;}const ids=new Set((gone||[]).map(g=>g.id));purged=go.filter(a=>ids.has(a.id));rows=rows.concat(purged.map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));}const notGone=go.length-purged.length+held.size;const lg=await logPurge(rows);toast((notGone?`Purged ${purged.length}, kept ${notGone}`+(kept.length?` — ${kept.length} file(s) not removed`:''):`Purged ${purged.length}`)+(lg?'':' — purge log not written'));load();}
 
 /* images */
-async function loadArticleImages(articleId){
-  const z=document.getElementById('imgZone');if(!z)return;
+// SB-634 (verification of 040e3da): draws only into the open sheet of the same article, in the same
+// session; a header change or Save/Reject that finishes after another article was opened draws nothing.
+// Checked before the query (setHeader calls this after its own await) and again after it.
+const sheetIs=(articleId,z,g)=>g===SESSION_GEN&&z.isConnected&&CURRENT&&CURRENT.id===articleId;
+async function loadArticleImages(articleId){const g=SESSION_GEN;
+  const z=document.getElementById('imgZone');if(!z||!sheetIs(articleId,z,g))return;
   const {data,error}=await sb.from('image_assets').select('*').eq('article_id',articleId).in('status',['candidate','accepted']).order('sort_order');
+  if(!sheetIs(articleId,z,g))return;
   if(error){z.innerHTML='<div class="lbl">Header image</div><div class="muted">'+esc(error.message)+'</div>';return;}
   const imgs=data||[];const hero=imgs.find(i=>i.status==='accepted');const cands=imgs.filter(i=>i.status==='candidate');
   let html='<div class="lbl">Header image</div>';
@@ -361,12 +388,16 @@ async function loadArticleImages(articleId){
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><button class="btn-ghost" onclick="requestNewImages('${articleId}')">✨ Request set</button><button class="btn-ghost" onclick="openLibraryPicker('${articleId}')">🖼 Use saved</button></div><div id="libPick"></div>`;
   z.innerHTML=html;
 }
-async function acceptImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');const {error}=await sb.from('image_assets').update({status:'accepted'}).eq('id',id);if(error){toast(error.message);return;}await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
-async function rejectImage(id){await sb.from('image_assets').update({status:'rejected'}).eq('id',id);toast('Rejected');loadArticleImages(CURRENT.id);}
-async function saveImage(id){await sb.from('image_assets').update({status:'saved'}).eq('id',id);toast('Saved to library');loadArticleImages(CURRENT.id);}
+// SB-636: one RPC, one transaction: demote the old header, accept this image, point the article at it.
+async function setHeader(id,articleId){const {error}=await sb.rpc('set_article_header',{p_article_id:articleId,p_image_id:id});if(error){toast('Header not changed: '+error.message);return false;}toast('Set as header');loadArticleImages(articleId);return true;}
+async function acceptImage(id,articleId){await setHeader(id,articleId);}
+// SB-636: capture the article before any await (the sheet may close meanwhile) and check the row changed.
+async function setImageStatus(id,status,done){const aid=CURRENT&&CURRENT.id;const {data,error}=await sb.from('image_assets').update({status}).eq('id',id).select('id');if(error){toast(error.message);return;}if(!data||!data.length){toast('Not saved — this image changed or is no longer yours');return;}toast(done);if(aid)loadArticleImages(aid);}
+async function rejectImage(id){await setImageStatus(id,'rejected','Rejected');}
+async function saveImage(id){await setImageStatus(id,'saved','Saved to library');}
 async function requestNewImages(articleId){const fb=(document.getElementById('imgfb')||{}).value;const a=ARTICLES.find(x=>x.id===articleId);const {error}=await sb.from('image_requests').insert({article_id:articleId,prompt:a&&(a.header_image_prompt||a.hook||a.title),feedback:(fb||'').trim()||null,count:3,status:'pending'});if(error){toast(error.message);return;}toast('New set requested');}
 async function openLibraryPicker(articleId){const p=document.getElementById('libPick');const {data}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const imgs=data||[];if(!imgs.length){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">No saved images yet.</div>';return;}p.innerHTML='<div class="muted" style="font-size:12px;margin:10px 0 6px">Pick a saved image:</div><div class="imgrid">'+imgs.map(i=>`<div class="imgcard"><img src="${esc(i.public_url)}" onclick="useLibraryImage('${i.id}','${articleId}')"><div class="imgcap">${esc(i.description||i.prompt||'')}</div></div>`).join('')+'</div>';}
-async function useLibraryImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');await sb.from('image_assets').update({status:'accepted',article_id:articleId}).eq('id',id);await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
+async function useLibraryImage(id,articleId){if(await setHeader(id,articleId)){const p=document.getElementById('libPick');if(p)p.innerHTML='';}}
 
 /* scheduling */
 function nextSlotDate(slot,after){const d=new Date(after.getTime());d.setSeconds(0,0);for(let i=0;i<21;i++){const c=new Date(d.getTime()+i*864e5);if(c.getDay()===slot.dow){c.setHours(slot.h,slot.m,0,0);if(c>after)return c;}}return null;}
@@ -395,13 +426,58 @@ function renderAgenda(){
     h+=`<div class="day"><h4>${dn[i]}</h4><div class="date">${d.getDate()}</div>${best.map(s=>`<span class="best">${s.h>12?s.h-12:s.h}:${String(s.m).padStart(2,'0')} ${s.h>=12?'PM':'AM'} ${s.tier}</span>`).join('')}${evs.map(a=>`<div class="ev" onclick="openSheet('${a.id}')"><div class="t">${tm(a.scheduled_for)}</div>${esc(a.title)}</div>`).join('')}</div>`;}
   document.getElementById('agenda').innerHTML=h;
 }
-async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger" style="padding:7px 11px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
-async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data}=await sb.from('image_assets').select('storage_path,description').eq('id',id).single();await deleteStorage([data&&data.storage_path]);const {error}=await sb.from('image_assets').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data&&data.storage_path,title:data&&data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
-async function renderPurged(){const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
+async function renderLibrary(){const gen=SESSION_GEN;const {data,error}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});if(gen!==SESSION_GEN)return;const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger" style="padding:7px 11px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
+async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data,error:se}=await sb.from('image_assets').select('id,storage_path,storage_bucket,description').eq('id',id).single();if(se||!data){toast(se?se.message:'Image not found');return;}const {kept,err}=await removeImages([data]);if(err){toast('Image not removed: '+err);return;}if(kept.length){toast('File not removed — image kept');renderLibrary();return;}const lg=await logPurge([{entity_type:'image',entity_id:id,storage_path:data.storage_path,title:data.description,reason:'manual_delete'}]);toast(lg?'Deleted':'Deleted — purge log not written');renderLibrary();}
+async function renderPurged(){const g=SESSION_GEN;const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);if(g!==SESSION_GEN)return;const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
 
 /* storage + audit helpers */
-async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);if(!paths.length)return;try{await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets`,{method:'DELETE',headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({prefixes:paths})});}catch(e){}}
-async function logPurge(rows){if(rows&&rows.length)await sb.from('lce_deletion_log').insert(rows.map(r=>({...r,user_id:USER&&USER.id})));}
+// SB-182: this sent the API key in Authorization: Bearer. That worked by
+// accident under the legacy anon JWT (any JWT parsed, and the request ran as
+// `anon`); a publishable key is rejected outright in that header, so the swap
+// would have broken it. It sends the signed-in user's session token now, which
+// is what a delete should have carried all along — the request runs as
+// `authenticated` rather than as an anonymous visitor.
+// Failures were also swallowed whole by an empty catch, so a delete that never
+// happened looked identical to one that did. It reports now.
+// SB-631: it also returns the paths the Storage API says it removed. The API answers 200 with
+// an empty list when nothing matched (RLS hid the object, a wrong path, already gone), so r.ok
+// alone cannot tell a removal from a no-op.
+async function deleteStorage(paths){paths=(paths||[]).filter(Boolean);const gone=new Set();if(!paths.length)return gone;
+  try{
+    const {data}=await sb.auth.getSession();
+    const t=data.session&&data.session.access_token;
+    if(!t){toast('Not signed in — files were not deleted');return gone;}
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/project-assets`,{method:'DELETE',
+      headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json'},
+      body:JSON.stringify({prefixes:paths})});
+    if(!r.ok){toast('Files not deleted: '+r.status);return gone;}
+    const out=await r.json().catch(()=>[]);
+    (Array.isArray(out)?out:[]).forEach(o=>{if(o&&paths.includes(o.name))gone.add(o.name);});
+  }catch(e){toast('Files not deleted: '+e.message);}
+  return gone;}
+// An empty answer from the removal means "nothing matched": the file may be hidden from this
+// user, or already gone (an earlier removal whose row delete then failed, or a second row on the
+// same path). project-assets is public, so a HEAD on the public URL tells them apart: 400/404 is
+// gone (storage-api renders a missing key as 400), 2xx is still there, anything else is unknown and
+// keeps the row. Only project-assets is asked: a private or unknown bucket also answers 400. A CDN
+// may serve a stale 200 for a while after a removal; that keeps the row, and a later retry clears it.
+async function fileGone(i){if((i.storage_bucket||'project-assets')!=='project-assets')return false;try{const r=await fetch(`${SUPABASE_URL}/storage/v1/object/public/project-assets/${i.storage_path.split('/').map(encodeURIComponent).join('/')}`,{method:'HEAD',cache:'no-store'});return r.status===400||r.status===404;}catch(e){return false;}}
+// Removes the image_assets rows whose file went (or that have no file) and returns the rest.
+// SB-633: storage_path is not unique (analyze-image adds a row per upload), so a file another row
+// still uses is not removed; the removed row just lets go of it.
+async function removeImages(imgs){imgs=imgs||[];const paths=[...new Set(imgs.map(i=>i.storage_path).filter(Boolean))];let shared=new Set();
+  if(paths.length){const mine=new Set(imgs.map(i=>i.id));const {data:others,error:oe}=await sb.from('image_assets').select('id,storage_path').in('storage_path',paths);if(oe)return {kept:imgs,done:[],err:oe.message};shared=new Set((others||[]).filter(o=>!mine.has(o.id)).map(o=>o.storage_path));}
+  const gone=await deleteStorage(paths.filter(p=>!shared.has(p)));shared.forEach(p=>gone.add(p));
+  const unsure=[...new Map(imgs.filter(i=>i.storage_path&&!gone.has(i.storage_path)).map(i=>[i.storage_path,i])).values()];
+  (await Promise.all(unsure.map(async i=>(await fileGone(i))?i.storage_path:null))).forEach(p=>{if(p)gone.add(p);});
+  const done=imgs.filter(i=>!i.storage_path||gone.has(i.storage_path));
+  // SB-634: only rows the delete returned count as removed.
+  let removed=[];if(done.length){const {data:gone,error}=await sb.from('image_assets').delete().in('id',done.map(i=>i.id)).select('id');if(error)return {kept:imgs,done:[],err:error.message};const ids=new Set((gone||[]).map(g=>g.id));removed=done.filter(i=>ids.has(i.id));}
+  return {kept:imgs.filter(i=>!removed.includes(i)),done:removed,err:null};}
+// SB-635: the purge log records every image row a manual removal took, not only the article.
+function imageLog(imgs,reason){return (imgs||[]).map(i=>({entity_type:'image',entity_id:i.id,storage_path:i.storage_path||null,reason}));}
+// SB-635: a failed log write is reported (callers fold it into their toast) instead of being ignored.
+async function logPurge(rows){if(!rows||!rows.length)return true;const {error}=await sb.from('lce_deletion_log').insert(rows.map(r=>({...r,user_id:USER&&USER.id})));return !error;}
 
 /* utils */
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -441,8 +517,9 @@ async function createArticle(){
     source:'article-studio',
     meta:{created_via:'article-studio-pwa',created_at:new Date().toISOString()}
   };
-  const {error}=await sb.from('articles').insert(row);
+  const {data:made,error}=await sb.from('articles').insert(row).select('id');
   if(error){toast('Error: '+error.message);return;}
+  if(!made||!made.length){toast('Draft not created');return;}
   toast('Draft created');
   closeNewSheet();
   await load();

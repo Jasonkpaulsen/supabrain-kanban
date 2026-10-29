@@ -1,6 +1,10 @@
 // Article Studio service worker — app-shell cache, network-first for data.
-const CACHE = 'article-studio-v2';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
+// SB-182: bumped for config.js entering the shell.
+// SB-631: bumped for the removal fix in index.html.
+// SB-633/SB-635: bumped for library-safe removals and purge logging.
+// SB-634/SB-636: bumped for checked writes, sign-out and the header RPC.
+const CACHE = 'article-studio-v9';
+const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
