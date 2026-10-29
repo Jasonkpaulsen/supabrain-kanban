@@ -5,12 +5,18 @@
 -- activity_log row cron_health_check writes) is rolled back. Run as postgres (SQL editor or the
 -- custom connector). The result is the exception text: "SCHEDULED_JOB_REGISTRY PASS (n checks) {...}".
 --
+-- Revision 2 (2026-10-29): adds the checks that fail against each mutant the independent verifier
+-- found the first revision could not tell apart (stuck at 1 h, missing ignoring enabled / per-job gap /
+-- the recent window, failed without timeout or the 24 h window, stuck and finish not limited to
+-- registry rows), plus tz and tickets validation and the agent_inactive flag (20261029041142).
+--
 -- Client-role checks catch the error inline: functions created by postgres grant no EXECUTE to
 -- client roles (SB-488), so a pg_temp helper would itself fail with 42501.
 do $suite$
 declare
   r jsonb := '{}'::jsonb; fails int; st text; ok boolean; n int;
   v_run uuid; v_run2 uuid; v_old uuid; v_young uuid; v_fail uuid; v_ticket uuid; hc jsonb;
+  v_mid uuid; v_to uuid; v_oldfail uuid; v_ar uuid; v_x uuid;
   role_name text; q text;
   pm constant uuid := '056e5d28-9be8-4008-8117-2802bf7a61bd';
 begin
@@ -28,6 +34,13 @@ begin
   insert into public.scheduled_job_registry (job, name, host, trigger_id, schedule, agent_id, expected_runs_per_day,
          max_gap_hours, owner, enabled)
   values ('qa-sb661-disabled', 'qa fixture', 'cloud', 'trig_qaSB661e', '0 5 * * *', pm, 1, 26, 'SupaBrain QA', false);
+  -- revision 2 (verifier mutants): per-job gaps, a stale-only run, and a disabled job that IS wired
+  insert into public.scheduled_job_registry (job, name, host, trigger_id, schedule, agent_id, expected_runs_per_day,
+         max_gap_hours, telemetry, owner, monitor_from, enabled)
+  values ('qa-sb661-shortgap', 'qa fixture', 'cloud', 'trig_qaSB661f', '0 * * * *', pm, 24, 2, 'agent_runs', 'SupaBrain QA', now() - interval '3 days', true),
+         ('qa-sb661-longgap', 'qa fixture', 'cloud', 'trig_qaSB661g', '0 4 * * 6', pm, 0.142857, 170, 'agent_runs', 'SupaBrain QA', now() - interval '10 days', true),
+         ('qa-sb661-stale', 'qa fixture', 'cloud', 'trig_qaSB661h', '0 6 * * *', pm, 1, 26, 'agent_runs', 'SupaBrain QA', now() - interval '3 days', true),
+         ('qa-sb661-wired-off', 'qa fixture', 'cloud', 'trig_qaSB661i', '0 7 * * *', pm, 1, 26, 'agent_runs', 'SupaBrain QA', now() - interval '3 days', false);
 
   -- TC-SB661-1: start/finish round trip
   v_run := public.log_scheduled_run_start('qa-sb661-fresh', null, 'trig_qaSB661b', 'cloud');
@@ -124,6 +137,26 @@ begin
   update public.agent_runs set started_at = now() - interval '1 hour' where id = v_young;
   v_fail := public.log_scheduled_run_start('qa-sb661-fresh');
   ok := public.log_scheduled_run_finish(v_fail, 'failed', 'qa failure');
+  -- revision 2 fixtures
+  v_mid := public.log_scheduled_run_start('qa-sb661-fresh');                  -- 90 min: not stuck at 2 h
+  update public.agent_runs set started_at = now() - interval '90 minutes' where id = v_mid;
+  v_x := public.log_scheduled_run_start('qa-sb661-shortgap');                 -- last run 3 h ago, gap 2 h: missing
+  ok := public.log_scheduled_run_finish(v_x, 'completed');
+  update public.agent_runs set started_at = now() - interval '3 hours', finished_at = now() - interval '3 hours' where id = v_x;
+  v_x := public.log_scheduled_run_start('qa-sb661-longgap');                  -- last run 30 h ago, gap 170 h: not missing
+  ok := public.log_scheduled_run_finish(v_x, 'completed');
+  update public.agent_runs set started_at = now() - interval '30 hours', finished_at = now() - interval '30 hours' where id = v_x;
+  v_x := public.log_scheduled_run_start('qa-sb661-stale');                    -- only run 30 h ago, gap 26 h: missing
+  ok := public.log_scheduled_run_finish(v_x, 'completed');
+  update public.agent_runs set started_at = now() - interval '30 hours', finished_at = now() - interval '30 hours' where id = v_x;
+  v_to := public.log_scheduled_run_start('qa-sb661-fresh');                   -- timeout: listed as failed
+  ok := public.log_scheduled_run_finish(v_to, 'timeout', 'qa timeout');
+  v_oldfail := public.log_scheduled_run_start('qa-sb661-fresh');              -- failed 30 h ago: outside the 24 h window
+  ok := public.log_scheduled_run_finish(v_oldfail, 'failed', 'qa old failure');
+  update public.agent_runs set started_at = now() - interval '31 hours', finished_at = now() - interval '30 hours' where id = v_oldfail;
+  insert into public.agent_runs (user_id, agent_id, work_item_id, status, trigger_type, started_at, run_metadata)
+  values ('5ecbd44a-a3e2-4363-9133-dff3851ba0f5', pm, null, 'running', 'scheduled', now() - interval '3 hours', '{"job": "qa-sb661-agent-runner-shape"}')
+  returning id into v_ar;                                                      -- not a registry row: never stuck, never closable
   hc := public.cron_health_check();
   r := r || jsonb_build_object('TC-SB661-4.missing_flagged', case
          when hc->'registry'->'missing' @> '[{"job": "qa-sb661-overdue"}]' then 'pass' else 'FAIL' end);
@@ -151,6 +184,45 @@ begin
          when hc->'registry'->'off_standard_connectors' @> '[{"job": "dev-heartbeat"}]'
               and not (hc->'registry'->'off_standard_connectors' @> '[{"job": "pm-triage"}]')
          then 'pass' else 'FAIL' end);
+
+  -- revision 2 checks (each fails against one mutant the 2026-10-29 verifier found uncaught)
+  r := r || jsonb_build_object('TC-SB661-5.stuck_threshold_2h', case
+         when not (hc->'registry'->'stuck' @> jsonb_build_array(jsonb_build_object('run_id', v_mid))) then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-5.stuck_registry_only', case
+         when not (hc->'registry'->'stuck' @> jsonb_build_array(jsonb_build_object('run_id', v_ar))) then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-5.failed_includes_timeout', case
+         when hc->'registry'->'failed' @> jsonb_build_array(jsonb_build_object('run_id', v_to, 'status', 'timeout')) then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-5.failed_24h_window', case
+         when not (hc->'registry'->'failed' @> jsonb_build_array(jsonb_build_object('run_id', v_oldfail))) then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-4.per_job_gap', case
+         when hc->'registry'->'missing' @> '[{"job": "qa-sb661-shortgap"}]'
+              and not (hc->'registry'->'missing' @> '[{"job": "qa-sb661-longgap"}]') then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-4.recent_runs_only', case
+         when hc->'registry'->'missing' @> '[{"job": "qa-sb661-stale"}]' then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-4.enabled_only', case
+         when not (hc->'registry'->'missing' @> '[{"job": "qa-sb661-wired-off"}]') then 'pass' else 'FAIL' end);
+  r := r || jsonb_build_object('TC-SB661-1.finish_registry_rows_only', case
+         when public.log_scheduled_run_finish(v_ar, 'completed') is false
+              and (select status from public.agent_runs where id = v_ar) = 'running' then 'pass' else 'FAIL' end);
+  st := '';
+  foreach q in array array[
+      $q$insert into public.scheduled_job_registry (job, name, host, trigger_id, schedule, tz, expected_runs_per_day, max_gap_hours, owner) values ('qa-sb661-badtz', 'x', 'cloud', 'trig_x', '* * * * *', 'Mars/Olympus', 1, 1, 'qa')$q$,
+      $q$update public.scheduled_job_registry set tz = 'Nowhere/Land' where job = 'qa-sb661-fresh'$q$,
+      format($q$select public.log_scheduled_run_finish(%L, 'completed', null, null, null, '{"tickets": ["SB-1", 2]}'::jsonb)$q$, v_run2)] loop
+    begin
+      execute q; st := st || 'ok,';
+    exception when others then st := st || case when sqlerrm like 'SB-661:%' then 'SB-661' else sqlstate end || ',';
+    end;
+  end loop;
+  r := r || jsonb_build_object('TC-SB661-1.tz_and_ticket_validation', case
+         when st = 'SB-661,SB-661,SB-661,' then 'pass' else 'FAIL: ' || st end);
+  update public.agents set status = 'archived' where id = pm;
+  v_x := public.log_scheduled_run_start('qa-sb661-fresh');
+  r := r || jsonb_build_object('TC-SB661-1.agent_inactive_flag', case
+         when (select (run_metadata->>'agent_inactive')::boolean from public.agent_runs where id = v_x)
+              and (select (run_metadata->>'agent_inactive')::boolean = false from public.agent_runs where id = v_run2)
+         then 'pass' else 'FAIL' end);
+  update public.agents set status = 'active' where id = pm;
 
   -- seed and shape
   r := r || jsonb_build_object('TC-SB661-seed', case
