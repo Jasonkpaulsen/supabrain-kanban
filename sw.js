@@ -5,12 +5,18 @@
 // SB-199/200: Domain-aware narrative swap in dashboards
 // SB-771: Needs Jason lane + header badge, Approve / Reject / Un-approve through
 //         rpc/decide_work_item (SB-770). v12 makes installed iPhone apps take it.
-const CACHE_NAME = 'jarvis-pwa-v12';
+// SB-182, SB-565, SB-616, SB-623 (from PR #10, split under SB-775): config.js and
+//         cancel-ui.js join the app shell, and the pages gain the cancelled state,
+//         summary-card filters and the automation_status toggle. v13 so returning
+//         visitors fetch the new shell instead of the cached v12 one.
+const CACHE_NAME = 'jarvis-pwa-v13';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
 const APP_SHELL = [
   './jarvis-pwa.html',
+  './config.js',
+  './cancel-ui.js',
   './manifest.json',
   './kanban-icon.svg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
