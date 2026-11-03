@@ -111,7 +111,18 @@
   .imgcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .imgcard img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
   .imgcap{font-size:11.5px;color:var(--muted);padding:7px 10px}
-  .imgacts{display:flex;gap:6px;padding:0 10px 10px}.imgacts button{flex:1;font-size:12px;padding:8px 4px}
+  .imgacts{display:flex;gap:6px;padding:0 10px 10px}.imgacts button{flex:1;font-size:13px;padding:8px 4px;min-height:44px}
+  /* LCE-021: swipeable gallery. Each card is nearly full width; the next one peeks so the swipe is discoverable. */
+  .gallery{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:none;margin-top:8px;padding-bottom:2px}
+  .gallery::-webkit-scrollbar{display:none}
+  .gallery .imgcard{flex:0 0 calc(100% - 28px);scroll-snap-align:center}
+  .gallery .imgcard:only-child{flex-basis:100%}
+  .galpos{display:flex;justify-content:center;gap:6px;margin-top:8px}
+  .galpos i{width:7px;height:7px;border-radius:50%;background:var(--line);display:block}.galpos i.on{background:var(--gold)}
+  .imgtools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.imgtools button{min-height:44px}
+  .imgreq{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:8px 0}
+  .imgreq.err{color:var(--red);border-color:#4a2a2a}
+  .btn-tap{min-height:44px;min-width:44px}
 
   .slot{display:flex;justify-content:space-between;align-items:center;padding:13px;border:1px solid var(--line);border-radius:10px;margin-bottom:9px}
   .slot.taken{opacity:.4}.slot .tier{font-size:10px;text-transform:uppercase;letter-spacing:1px}
@@ -330,7 +341,7 @@ function openSheet(id){
   document.getElementById('sheet').classList.add('open');
   loadArticleImages(a.id);
 }
-function closeSheet(){document.getElementById('sheet').classList.remove('open');CURRENT=null;}
+function closeSheet(){document.getElementById('sheet').classList.remove('open');CURRENT=null;clearTimeout(IMG_POLL);}
 function toggleBody(m){document.getElementById('bodyRead').style.display=m==='read'?'block':'none';document.getElementById('bodyEdit').style.display=m==='edit'?'block':'none';document.getElementById('segRead').classList.toggle('on',m==='read');document.getElementById('segEdit').classList.toggle('on',m==='edit');}
 async function saveBody(id){const b=document.getElementById('body').value;if(await patch(id,{body_md:b,word_count:b.trim()?b.trim().split(/\s+/).length:0})){toast('Saved');await load();openSheet(id);}}
 function pushHist(a,action,note){const h=(a.feedback_history||[]).slice();h.push({at:new Date().toISOString(),action,note:note||'',by:USER&&USER.email});return h;}
@@ -344,29 +355,56 @@ async function destroy(id){if(!confirm('Permanently delete this article?'))retur
 async function markPublished(id){const url=prompt('LinkedIn post URL (optional):','');const a=ARTICLES.find(x=>x.id===id);if(await patch(id,{status:'published',published_url:url||null,feedback_history:pushHist(a,'published',url||'')})){toast('Published');closeSheet();load();}}
 async function emptyTrash(){const {data:arts}=await sb.from('articles').select('id,title').eq('status','trashed');const ids=(arts||[]).map(a=>a.id);if(!ids.length){toast('Trash already empty');return;}if(!confirm(`Permanently delete ${ids.length} article(s)?`))return;const {data:imgs}=await sb.from('image_assets').select('id,storage_path').in('article_id',ids);await deleteStorage((imgs||[]).map(i=>i.storage_path));if(imgs&&imgs.length)await sb.from('image_assets').delete().in('id',imgs.map(i=>i.id));const {error}=await sb.from('articles').delete().in('id',ids);if(error){toast(error.message);return;}await logPurge((arts||[]).map(a=>({entity_type:'article',entity_id:a.id,title:a.title,reason:'manual_empty_trash'})));toast(`Purged ${ids.length}`);load();}
 
-/* images */
+/* images — LCE-021: mobile image curation */
+// Library images carry status 'saved' (kept from a candidate set) or 'library' (the column default).
+const LIB_STATUSES=['saved','library'];
+// The image worker (scheduled task lce-image-fulfiller) runs at these times; a request waits for the next one.
+const IMG_RUNS='9 AM, 1 PM and 6 PM';
+let IMG_POLL=null,IMG_WAIT=null;
+// Draw only into the sheet of the article that asked: the sheet may have closed or moved on during an await.
+const imgZoneFor=(articleId)=>CURRENT&&CURRENT.id===articleId?document.getElementById('imgZone'):null;
+function gallery(cards,n){return `<div class="gallery" onscroll="galScroll(this)">${cards}</div>`+(n>1?`<div class="galpos" aria-hidden="true">${Array.from({length:n},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')}</div>`:'');}
+function galScroll(el){const c=el.firstElementChild;if(!c)return;const i=Math.round(el.scrollLeft/(c.offsetWidth+10));const d=el.nextElementSibling;if(d&&d.classList.contains('galpos'))[...d.children].forEach((x,k)=>x.classList.toggle('on',k===i));}
 async function loadArticleImages(articleId){
-  const z=document.getElementById('imgZone');if(!z)return;
-  const {data,error}=await sb.from('image_assets').select('*').eq('article_id',articleId).in('status',['candidate','accepted']).order('sort_order');
-  if(error){z.innerHTML='<div class="lbl">Header image</div><div class="muted">'+esc(error.message)+'</div>';return;}
-  const imgs=data||[];const hero=imgs.find(i=>i.status==='accepted');const cands=imgs.filter(i=>i.status==='candidate');
+  clearTimeout(IMG_POLL);if(!imgZoneFor(articleId))return;
+  const [ir,rr]=await Promise.all([
+    sb.from('image_assets').select('*').eq('article_id',articleId).in('status',['candidate','accepted']).order('sort_order'),
+    sb.from('image_requests').select('id,status,error,created_at').eq('article_id',articleId).order('created_at',{ascending:false}).limit(1)]);
+  const z=imgZoneFor(articleId);if(!z)return;
+  if(ir.error){z.innerHTML='<div class="lbl">Header image</div><div class="muted">'+esc(ir.error.message)+'</div>';return;}
+  const imgs=ir.data||[];const hero=imgs.find(i=>i.status==='accepted');const cands=imgs.filter(i=>i.status==='candidate');
+  const req=((rr.data)||[])[0];const waiting=!!req&&(req.status==='pending'||req.status==='processing');
+  // A request that was waiting on the last draw and is now done: tell the user the set landed.
+  if(IMG_WAIT===articleId&&!waiting&&req&&req.status==='done')toast('New images ready');
+  IMG_WAIT=waiting?articleId:null;
   let html='<div class="lbl">Header image</div>';
-  if(hero)html+=`<div class="hero"><img src="${esc(hero.public_url)}"><span class="chip s-approved">✓ Accepted</span></div>`;
+  if(hero)html+=`<div class="hero"><img src="${esc(hero.public_url)}" alt="${esc(hero.description||'Header image')}"><span class="chip s-approved">✓ Accepted</span></div>`;
+  if(waiting)html+=`<div class="imgreq" id="imgReq">⏳ ${req.status==='processing'?'Generating your new set now.':`New set requested. It arrives at the next image run (${IMG_RUNS}).`} This panel updates when it lands.</div>`;
+  else if(req&&req.status==='failed')html+=`<div class="imgreq err" id="imgReq">Last request failed: ${esc(req.error||'unknown error')}. Request again below.</div>`;
   if(cands.length){
-    html+=`<div class="muted" style="font-size:12px;margin:8px 0 4px">${cands.length} candidate(s) — accept one, reject or save the rest:</div><div class="imgrid">`;
-    html+=cands.map(c=>`<div class="imgcard"><img src="${esc(c.public_url)}" onclick="window.open('${esc(c.public_url)}','_blank')"><div class="imgcap">${esc(c.description||'')}</div><div class="imgacts"><button class="btn-gold" onclick="acceptImage('${c.id}','${articleId}')">Accept</button><button class="btn-ghost" onclick="saveImage('${c.id}')">Save</button><button class="btn-danger" onclick="rejectImage('${c.id}')">Reject</button></div></div>`).join('');
-    html+='</div>';
-  }else if(!hero){html+='<div class="muted" style="font-size:12px;margin:6px 0">No images yet. Request a set below.</div>';}
+    html+=`<div class="muted" style="font-size:12px;margin:8px 0 4px">${cands.length} candidate${cands.length>1?'s':''}${cands.length>1?' — swipe to compare.':'.'} Accept one, save or reject the rest.</div>`;
+    html+=gallery(cands.map(c=>`<div class="imgcard"><img src="${esc(c.public_url)}" alt="${esc(c.description||'Candidate image')}" onclick="window.open('${esc(c.public_url)}','_blank')"><div class="imgcap">${esc(c.description||'')}</div><div class="imgacts"><button class="btn-gold" onclick="acceptImage('${c.id}','${articleId}')">Accept</button><button class="btn-ghost" onclick="saveImage('${c.id}')">Save</button><button class="btn-danger" onclick="rejectImage('${c.id}')">Reject</button></div></div>`).join(''),cands.length);
+  }else if(!hero&&!waiting){html+='<div class="muted" style="font-size:12px;margin:6px 0">No images yet. Request a set below.</div>';}
   html+=`<textarea id="imgfb" rows="2" style="margin-top:9px" placeholder="Feedback for a new set (brighter, less literal, no text…)"></textarea>
-   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><button class="btn-ghost" onclick="requestNewImages('${articleId}')">✨ Request set</button><button class="btn-ghost" onclick="openLibraryPicker('${articleId}')">🖼 Use saved</button></div><div id="libPick"></div>`;
+   <div class="imgtools"><button class="btn-ghost" id="reqBtn" onclick="requestNewImages('${articleId}')" ${waiting?'disabled':''}>${waiting?'⏳ Set requested':'✨ Request set'}</button><button class="btn-ghost" onclick="openLibraryPicker('${articleId}')">🖼 Use saved</button></div><div id="libPick"></div>`;
   z.innerHTML=html;
+  // While a set is on its way, check again every minute for as long as this sheet stays open.
+  if(waiting)IMG_POLL=setTimeout(()=>loadArticleImages(articleId),60000);
 }
-async function acceptImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');const {error}=await sb.from('image_assets').update({status:'accepted'}).eq('id',id);if(error){toast(error.message);return;}await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
-async function rejectImage(id){await sb.from('image_assets').update({status:'rejected'}).eq('id',id);toast('Rejected');loadArticleImages(CURRENT.id);}
-async function saveImage(id){await sb.from('image_assets').update({status:'saved'}).eq('id',id);toast('Saved to library');loadArticleImages(CURRENT.id);}
-async function requestNewImages(articleId){const fb=(document.getElementById('imgfb')||{}).value;const a=ARTICLES.find(x=>x.id===articleId);const {error}=await sb.from('image_requests').insert({article_id:articleId,prompt:a&&(a.header_image_prompt||a.hook||a.title),feedback:(fb||'').trim()||null,count:3,status:'pending'});if(error){toast(error.message);return;}toast('New set requested');}
-async function openLibraryPicker(articleId){const p=document.getElementById('libPick');const {data}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const imgs=data||[];if(!imgs.length){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">No saved images yet.</div>';return;}p.innerHTML='<div class="muted" style="font-size:12px;margin:10px 0 6px">Pick a saved image:</div><div class="imgrid">'+imgs.map(i=>`<div class="imgcard"><img src="${esc(i.public_url)}" onclick="useLibraryImage('${i.id}','${articleId}')"><div class="imgcap">${esc(i.description||i.prompt||'')}</div></div>`).join('')+'</div>';}
-async function useLibraryImage(id,articleId){await sb.from('image_assets').update({status:'saved'}).eq('article_id',articleId).eq('status','accepted');await sb.from('image_assets').update({status:'accepted',article_id:articleId}).eq('id',id);await sb.from('articles').update({image_asset_id:id}).eq('id',articleId);toast('Set as header');loadArticleImages(articleId);}
+// SB-636 (ported from PR 10): one RPC, one transaction: demote the old header, accept this image, point the
+// article at it. A library image is copied (SB-643), so it stays in the library for reuse.
+async function setHeader(id,articleId){const {error}=await sb.rpc('set_article_header',{p_article_id:articleId,p_image_id:id});if(error){toast('Header not changed: '+error.message);return false;}toast('Set as header');loadArticleImages(articleId);return true;}
+async function acceptImage(id,articleId){await setHeader(id,articleId);}
+// SB-636 (ported from PR 10): capture the article before any await and check the row really changed
+// (RLS hides a row it will not update without returning an error).
+async function setImageStatus(id,status,done){const aid=CURRENT&&CURRENT.id;const {data,error}=await sb.from('image_assets').update({status}).eq('id',id).select('id');if(error){toast(error.message);return;}if(!data||!data.length){toast('Not saved — this image changed or is no longer yours');return;}toast(done);if(aid)loadArticleImages(aid);}
+async function rejectImage(id){await setImageStatus(id,'rejected','Rejected');}
+async function saveImage(id){await setImageStatus(id,'saved','Saved to library');}
+async function requestNewImages(articleId){const b=document.getElementById('reqBtn');if(b)b.disabled=true;const fb=(document.getElementById('imgfb')||{}).value;const a=ARTICLES.find(x=>x.id===articleId);const {error}=await sb.from('image_requests').insert({article_id:articleId,prompt:a&&(a.header_image_prompt||a.hook||a.title),feedback:(fb||'').trim()||null,count:3,status:'pending'});if(error){if(b)b.disabled=false;toast(error.message);return;}toast('New set requested');IMG_WAIT=articleId;loadArticleImages(articleId);}
+async function openLibraryPicker(articleId){const p=document.getElementById('libPick');if(!p)return;if(p.innerHTML){p.innerHTML='';return;}const {data,error}=await sb.from('image_assets').select('*').in('status',LIB_STATUSES).order('updated_at',{ascending:false});if(!imgZoneFor(articleId))return;if(error){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){p.innerHTML='<div class="muted" style="font-size:12px;margin-top:8px">No saved images yet.</div>';return;}p.innerHTML=`<div class="muted" style="font-size:12px;margin:10px 0 4px">${imgs.length} saved image${imgs.length>1?'s':''}${imgs.length>1?' — swipe to browse.':'.'}</div>`+gallery(imgs.map(i=>`<div class="imgcard"><img src="${esc(i.public_url)}" alt="${esc(i.description||i.prompt||'Saved image')}"><div class="imgcap">${esc(i.description||i.prompt||'')}</div><div class="imgacts"><button class="btn-gold" onclick="useLibraryImage('${i.id}','${articleId}')">Use this image</button></div></div>`).join(''),imgs.length);}
+async function useLibraryImage(id,articleId){if(await setHeader(id,articleId)){const p=document.getElementById('libPick');if(p)p.innerHTML='';}}
+// Coming back to the app (phone unlocked, tab switched) refreshes the open article's images.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&CURRENT)loadArticleImages(CURRENT.id);});
 
 /* scheduling */
 function nextSlotDate(slot,after){const d=new Date(after.getTime());d.setSeconds(0,0);for(let i=0;i<21;i++){const c=new Date(d.getTime()+i*864e5);if(c.getDay()===slot.dow){c.setHours(slot.h,slot.m,0,0);if(c>after)return c;}}return null;}
@@ -386,6 +424,8 @@ async function customSchedule(id){const v=document.getElementById('customDt').va
 /* views */
 function setView(v){VIEW=v;
   ['board','cal','lib','purged'].forEach(x=>{document.getElementById('n-'+x).classList.toggle('on',x===v);document.getElementById(x+'View').style.display=x===v?'block':'none';});
+  // LCE-021: the Library opens straight onto its images; pipeline stats and recommendations belong to the board views.
+  ['stats','recs'].forEach(x=>{document.getElementById(x).style.display=v==='lib'?'none':'';});
   if(v==='cal')renderAgenda();if(v==='lib')renderLibrary();if(v==='purged')renderPurged();
 }
 function renderAgenda(){
@@ -395,7 +435,7 @@ function renderAgenda(){
     h+=`<div class="day"><h4>${dn[i]}</h4><div class="date">${d.getDate()}</div>${best.map(s=>`<span class="best">${s.h>12?s.h-12:s.h}:${String(s.m).padStart(2,'0')} ${s.h>=12?'PM':'AM'} ${s.tier}</span>`).join('')}${evs.map(a=>`<div class="ev" onclick="openSheet('${a.id}')"><div class="t">${tm(a.scheduled_for)}</div>${esc(a.title)}</div>`).join('')}</div>`;}
   document.getElementById('agenda').innerHTML=h;
 }
-async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').eq('status','saved').order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger" style="padding:7px 11px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
+async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').in('status',LIB_STATUSES).order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger btn-tap" style="padding:7px 14px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
 async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data}=await sb.from('image_assets').select('storage_path,description').eq('id',id).single();await deleteStorage([data&&data.storage_path]);const {error}=await sb.from('image_assets').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data&&data.storage_path,title:data&&data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
 async function renderPurged(){const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
 

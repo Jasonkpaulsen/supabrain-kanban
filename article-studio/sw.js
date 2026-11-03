@@ -1,5 +1,5 @@
 // Article Studio service worker — app-shell cache, network-first for data.
-const CACHE = 'article-studio-v2';
+const CACHE = 'article-studio-v3'; // v3: LCE-021 image curation
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {
