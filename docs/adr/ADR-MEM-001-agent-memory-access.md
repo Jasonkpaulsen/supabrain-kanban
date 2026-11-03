@@ -1,0 +1,96 @@
+# ADR-MEM-001: Who can read an agent's memories
+
+- **Status:** Accepted (System Architect, 2026-10-23), implementing Jason's SB-515 requirement of 2026-10-07
+- **Tickets:** SB-581 (build), SB-515 (requirement)
+- **Migration:** `supabase/migrations/20261023141914_sb581_agent_memory_access.sql`
+- **Suite:** `supabase/tests/agent_memory_access_suite.sql` (TC-SB581-01 to TC-SB581-04)
+
+## 1. Problem
+
+Jason, SB-515: "Global memories should be available for all users that have access. Using an agent should include the agent memory."
+
+The only SELECT policy on `public.memories`, `users_select_own`, let a signed-in user read:
+
+- global rows;
+- their own rows;
+- project rows in a *shared* project they belong to.
+
+An agent's memories are written in whatever project the agent was working in. So a user who can use the agent (through `agent_projects` and a project membership) could not read what the agent had learned elsewhere. `match_memories(p_agent => …)` also left out global memories, so an agent's recall needed two calls.
+
+## 2. Decisions
+
+| # | Question | Decision |
+|---|----------|----------|
+| D1 | Who reads an agent's memory | Every user `can_access_agent(agent_id, uid)` says can use the agent, whatever project the memory was written in. |
+| D2 | Private memories | `scope = 'private'` stays owner-only, even with an `agent_id`. |
+| D3 | Writes | Reading through an agent gives no write right. Tagging a memory with an agent needs ownership of the agent or a write role on a project it is linked to (§3a). |
+| D4 | Shape | One extra disjunct on `users_select_own`, not a second permissive policy. |
+| D5 | Recall | `match_memories(p_agent)` returns the agent's rows plus global ones. |
+
+## 3. Mechanism
+
+`users_select_own` keeps its expression verbatim as the first part and gains:
+
+```sql
+OR (agent_id IS NOT NULL AND scope <> 'private'
+    AND public.can_access_agent(agent_id, (select auth.uid())))
+```
+
+`can_access_agent` is SECURITY DEFINER. It refuses to answer for anyone but the caller, and checks for an `agent_projects` row whose project the user is a member of.
+
+Why one policy (D4): a second permissive SELECT policy would add `memories` to the advisor's `multiple_permissive_policies` list. Postgres ORs permissive policies anyway, so one policy gives the same result.
+
+`match_memories` keeps its signature, SECURITY INVOKER, `search_path = ''` and grants. Its agent filter becomes:
+
+```sql
+(p_agent IS NULL OR m.agent_id = p_agent OR m.scope = 'global')
+```
+
+RLS still decides which of those rows the caller sees.
+
+The migration asserts against a snapshot taken before the change that:
+
+- the old expression is kept;
+- the other five policies are identical;
+- `match_memories` is still invoker and has the new filter.
+
+### 3a. Write rules that keep the read rule honest (verifier, 2026-10-23)
+
+The independent verifier found that the read path could be obtained by writing. Migration `20261023193934_sb581_sb514_verifier_fixes.sql` closes both routes. Each policy keeps its old check as the first part, and every existing row already meets the new rules.
+
+| Hole | Before | After |
+|------|--------|-------|
+| Linking someone else's agent | A viewer of a shared project could link any agent to that project, because `agent_projects` writes checked only `user_id = auth.uid()`. That made `can_access_agent` true and exposed the agent's memories. | A link needs the writer to own the agent, and to own the project or be its owner or editor. |
+| Planting a memory | Any user could tag a memory with another user's agent, so the agent's users would read it. | `agent_id` must be null, an agent the writer owns, or one the writer can use. This applies to both insert and update. |
+
+TC-SB581-05 covers both, plus a positive control showing the owner can still link and tag.
+
+The re-verification found that "an agent the writer can use" still let a project *viewer* write into the agent's recall. Migration `20261024032111_sb581_agent_memory_write_role.sql` raises the bar for tagging. The writer must:
+
+- own the agent; or
+- be an owner or editor of a project the agent is linked to (by role, or through `projects.user_id`).
+
+This is the same bar as writing into that project.
+
+The accepted cost: an editor cannot edit a memory in their project when it carries an agent they could not tag with, because a `WITH CHECK` cannot see the old `agent_id`. On 2026-10-23 that affected 0 of 31 (editor, agent memory) pairs.
+
+TC-SB581-05 now also checks that a viewer cannot tag and an editor can.
+
+**Known limit, accepted (third verification pass).** The tag rule reads `agent_projects` under the writer's own RLS. Take a project owner known only through `projects.user_id`, with no membership row. That owner cannot see links made by someone else, so they cannot tag with another user's agent linked to their project.
+
+This fails closed. RLS can only hide rows, so it causes refusals, never grants. On 2026-10-23 it affected 0 real pairs.
+
+Fixing it would take a SECURITY DEFINER helper that signed-in users can execute, which is one more finding on the advisor's list. Giving that owner a membership row also lifts the limit.
+
+## 4. Exposure
+
+The change is intentionally cross-project. A non-private agent memory is readable by every user of that agent.
+
+Measured on 2026-10-23 over 236 memories (66 with an agent): **1** (user, memory) pair becomes newly readable. It is a Family Care Manager memory, readable by the one other user who can use that agent. TC-SB581-04 checks every such pair: non-private, with an agent the user can use, and not already readable.
+
+## 5. Alternatives considered
+
+- **A companion SELECT policy.** Same result, but adds a `multiple_permissive_policies` finding and a second place to reason about reads.
+- **Agent memories visible only within the agent's linked projects.** This would not meet "using an agent should include the agent memory". Memories are written wherever the agent works, so most of them would stay hidden.
+- **Include private agent memories.** Rejected. `private` means owner-only everywhere else, and an agent's private notes would leak to every user of the agent.
+- **A SECURITY DEFINER recall RPC.** Moves the access rule out of RLS, so direct table reads and the RPC could disagree.
