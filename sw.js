@@ -3,8 +3,9 @@
 // SB-185: Safe update flow (skipWaiting only on user acceptance)
 // SB-186: Background-sync queue removed, cache purge on logout
 // SB-199/200: Domain-aware narrative swap in dashboards
-// SB-275: Status-driven reversible approval (awaiting_jason column + un-approve)
-const CACHE_NAME = 'jarvis-pwa-v11';
+// SB-771: Needs Jason lane + header badge, Approve / Reject / Un-approve through
+//         rpc/decide_work_item (SB-770). v12 makes installed iPhone apps take it.
+const CACHE_NAME = 'jarvis-pwa-v12';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache

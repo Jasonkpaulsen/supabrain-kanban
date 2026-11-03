@@ -202,7 +202,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .cards-empty{font-size:12px;color:var(--tx-d);text-align:center;padding:24px 8px;}
 
 /* Move action (long-press) */
-.move-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--div);border-radius:16px 16px 0 0;z-index:400;transform:translateY(100%);transition:transform .2s ease;padding:16px 16px calc(16px + var(--safe-b));}
+.move-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--sf);border-top:1px solid var(--div);border-radius:16px 16px 0 0;z-index:400;transform:translateY(100%);transition:transform .2s ease;padding:16px 16px calc(16px + var(--safe-b));max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .move-sheet.open{transform:translateY(0);}
 .move-sheet h3{font-size:14px;font-weight:600;margin-bottom:12px;}
 .move-opt{width:100%;padding:14px;background:var(--card);border:1px solid var(--card-b);border-radius:8px;margin-bottom:6px;color:var(--tx);font-size:14px;font-weight:500;text-align:left;cursor:pointer;display:flex;align-items:center;gap:8px;border:none;background:var(--card);}
@@ -319,6 +319,27 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
 .age-badge.red{background:rgba(248,81,73,.15);color:var(--red);}
 @media(max-width:600px){.pulse-cards{flex-direction:column;}.pulse-card{min-width:0;max-width:none;}}
 
+/* === SB-771: Needs Jason — header badge, lane tab, decisions === */
+.nj-badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:5px 8px;border-radius:6px;border:1px solid rgba(248,81,73,.45);background:rgba(248,81,73,.15);color:var(--red);font-family:'SF Mono',monospace;cursor:pointer;min-height:30px;}
+.nj-badge b{background:var(--red);color:#fff;border-radius:8px;padding:0 6px;font-size:10px;}
+.nj-badge.aged{border-color:rgba(210,153,34,.5);background:rgba(210,153,34,.15);color:var(--orange);}
+.nj-badge.aged b{background:var(--orange);color:#000;}
+.col-tab.nj-tab span:first-child{color:var(--red);}
+.col-tab.nj-tab.active{border-bottom-color:var(--red);}
+.nj-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.nj-kind{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:var(--sf);border:1px solid var(--card-b);color:var(--tx-m);font-family:'SF Mono',monospace;}
+.nj-kind.pkg{border-color:rgba(248,81,73,.5);color:var(--red);}
+.nj-wait{font-size:10px;color:var(--tx-d);}
+.nj-wait.aged{color:var(--orange);font-weight:600;}
+.nj-decision{font-size:11px;color:var(--tx-m);margin-bottom:6px;}
+.badge.nj{background:rgba(248,81,73,.15);color:var(--red);}
+.badge.nj.aged{background:rgba(210,153,34,.15);color:var(--orange);}
+.move-sec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--tx-d);margin:12px 0 6px;font-family:'SF Mono',monospace;}
+.move-opt.decide-approve{color:var(--green);} .move-opt.decide-reject{color:var(--red);}
+.move-reject{display:flex;gap:6px;margin-bottom:6px;}
+.move-reject input{flex:1;min-width:0;padding:12px;background:var(--bg);border:1px solid var(--card-b);border-radius:8px;color:var(--tx);font-size:16px;outline:none;}
+.move-reject input.err{border-color:var(--red);}
+
 /* === SB-202: Ticket code — monospace styling === */
 /* (replaces existing .card-code) */
 
@@ -387,6 +408,7 @@ body.offline .panels{opacity:.7;pointer-events:auto;}
   <div class="top-bar">
     <span class="top-title">JARVIS</span>
     <div class="top-right">
+      <button class="nj-badge" id="nj-badge" style="display:none" title="Items waiting on Jason">Needs Jason <b id="nj-count">0</b></button>
       <div class="top-status"><span class="dot"></span>Nominal</div>
       <div class="top-avatar" id="btn-logout" title="Sign out">&#128100;</div>
     </div>
@@ -509,8 +531,36 @@ var DC={products:'#8b5cf6',business:'#58a6ff',career:'#2dd4bf',property:'#d29922
 var DL_FALLBACK=['products','business','career','property','operations','family','hobbies','club'];
 var DL=DL_FALLBACK; // overridden dynamically from briefing data
 var STATUSES=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
-var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950'};
-var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done'};
+var STAT_COLORS={backlog:'#8b949e',todo:'#58a6ff',in_progress:'#8b5cf6',on_hold:'#a371f7',blocked:'#f85149',review:'#d29922',escalated:'#f0883e',done:'#3fb950',awaiting_jason:'#ff7b72'};
+var STAT_NAMES={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',on_hold:'On Hold',blocked:'Blocked',review:'Review',escalated:'Escalated',done:'Done',awaiting_jason:'Awaiting Jason'};
+/* SB-771 — Needs Jason (SB-769 design 6). A virtual first tab, not a status:
+   it holds every card with needs_jason (plus anything in awaiting_jason), and
+   those cards are shown there only. isJason (rpc/is_jason_session) decides what
+   the move sheet OFFERS; the database is the gate. Jason also approves in chat,
+   recorded by JARVIS, so the board always re-reads the stored approval. */
+var LANE='needs_jason',isJason=false,deciding=false;
+var PRE_ACTIVE=['backlog','todo','on_hold','awaiting_jason'];
+var DECIDE_NAMES={approve:'Approve',reject:'Reject…',unapprove:'Un-approve'};
+var DECIDE_PAST={approve:'approved',reject:'rejected',unapprove:'un-approved'};
+var DECIDE_COLORS={approve:'#3fb950',reject:'#f85149',unapprove:'#8b949e'};
+function inLane(it){return it.needs_jason===true||it.status==='awaiting_jason';}
+function laneSort(a,b){var pa=a.status==='awaiting_jason'?0:1,pb=b.status==='awaiting_jason'?0:1;if(pa!==pb)return pa-pb;return(Number(b.waiting_days)||0)-(Number(a.waiting_days)||0);}
+function showLane(){return isJason||items.some(inLane);}
+function fmtWait(d){var n=Number(d);if(!isFinite(n))return'';return n<1?'<1d':Math.floor(n)+'d';}
+/* L2+ only (NULL level not offered), never on a finished or archived card,
+   un-approve only in the SB-275 pre-active columns. */
+function decisionsFor(it){
+  if(!isJason||!it||it.archived)return[];
+  if(!(it.authority_level>=2))return[];
+  if(it.status==='done'||it.status==='cancelled')return[];
+  var o=[];
+  if(it.approval_status!=='approved')o.push('approve');
+  if(it.approval_status!=='rejected')o.push('reject');
+  if((it.approval_status==='approved'||it.approval_status==='rejected')&&PRE_ACTIVE.indexOf(it.status)!==-1)o.push('unapprove');
+  return o;
+}
+/* Awaiting Jason is a move target for L2+ only; the database refuses L0/L1. */
+function moveTargets(it){var t=STATUSES.slice();if(it&&(it.authority_level>=2||it.status==='awaiting_jason'))t.splice(t.indexOf('done'),0,'awaiting_jason');return t;}
 /* SB-348 — the handler that recolours #m-status-dot used to be assigned inside
    openNewModal() only. openModal() (the edit path) set the initial colour but
    never bound the handler, so changing status on an existing card left the
@@ -534,7 +584,7 @@ var pulseDismissed=false,pulseTab='pipeline'; /* SB-258 session state */
 
 async function hdr(){var s=await sb.auth.getSession();var t=s.data.session&&s.data.session.access_token;if(!t)throw new Error('Not auth');return{'apikey':SB_KEY,'Authorization':'Bearer '+t,'Content-Type':'application/json'};}
 function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function toast(m,t){var e=document.createElement('div');e.className='toast '+(t||'success');e.textContent=m;document.body.appendChild(e);setTimeout(function(){e.remove();},2500);}
+function toast(m,t,ms){var e=document.createElement('div');e.className='toast '+(t||'success');e.textContent=m;document.body.appendChild(e);setTimeout(function(){e.remove();},ms||2500);}
 function iDom(it){return it.project_domain||projDom[it.project_id]||null;}
 function projDevAuto(p){return !!(p&&p.meta&&p.meta.dev_automation==='on');}
 
@@ -564,13 +614,15 @@ document.querySelectorAll('.nav-btn').forEach(function(b){
 async function loadAll(){
   try{
     var h=await hdr();
-    var [pR,lR,iR,aR,bR,jR]=await Promise.all([
+    var [pR,lR,iR,aR,bR,jR,jsR]=await Promise.all([
       fetch(SB_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/kanban_board_view?select=*'+(showArchived?'':'&archived=eq.false')+'&order=sort_order',{headers:h}),
       fetch(SB_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
       fetch(SB_URL+'/rest/v1/jarvis_briefings?select=*&order=briefing_date.desc&limit=1',{headers:h}),
-      fetch(SB_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score&decision=eq.review&order=score.desc&limit=5',{headers:h})
+      fetch(SB_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score&decision=eq.review&order=score.desc&limit=5',{headers:h}),
+      /* SB-771: a failure here only means "not Jason" — the options stay hidden. */
+      fetch(SB_URL+'/rest/v1/rpc/is_jason_session',{method:'POST',headers:h,body:'{}'}).catch(function(){return null;})
     ]);
     projects=pR.ok?await pR.json():[]; labels=lR.ok?await lR.json():[]; items=iR.ok?await iR.json():[];
     if(typeof updateOnlineTimestamp==='function')updateOnlineTimestamp();
@@ -579,6 +631,8 @@ async function loadAll(){
     projDom={}; projects.forEach(function(p){projDom[p.id]=p.domain||null;});
     var bd=bR.ok?await bR.json():[]; briefing=bd[0]||null;
     jobLeads=jR.ok?await jR.json():[];
+    isJason=false;if(jsR&&jsR.ok){try{isJason=(await jsR.json())===true;}catch(e){}}
+    renderNjBadge();
     attItems=items.filter(function(it){return it.acknowledged===false&&['todo','in_progress','blocked','review','escalated'].indexOf(it.status)!==-1&&['critical','high'].indexOf(it.priority)!==-1;}).sort(function(a,b){var o={critical:0,high:1};return(o[a.priority]||2)-(o[b.priority]||2);}).slice(0,10);
     renderJarvis();renderBoard();
   }catch(e){console.error(e);toast('Load error: '+e.message,'error');}
@@ -642,9 +696,14 @@ function renderPri(){
 }
 function renderAtt(){
   var ad=getJDom(),fil=attItems.filter(function(it){if(ad!=='all'&&iDom(it)!==ad)return false;return true;}),h='';
+  /* SB-771: what needs Jason comes first (up to five); a tap opens the lane. */
+  var nj=items.filter(function(it){return it.needs_jason===true&&(ad==='all'||iDom(it)===ad);}).sort(laneSort);
+  nj.slice(0,5).forEach(function(it){h+='<div class="j-card nj-att"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="badge nj'+(it.aging_breached?' aged':'')+'">Needs Jason</span><span class="j-card-proj">'+esc(it.status==='awaiting_jason'?'Decision package':'Approval only · '+(STAT_NAMES[it.status]||it.status))+(it.waiting_days!=null?' · '+fmtWait(it.waiting_days)+' waiting':'')+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.decision_needed?'<div class="j-card-desc">'+esc(it.decision_needed)+'</div>':'')+'</div>';});
+  if(nj.length>5)h+='<div class="j-card nj-att"><div class="j-card-desc">+ '+(nj.length-5)+' more waiting on you</div></div>';
   fil.forEach(function(it){h+='<div class="j-card"><div class="j-card-meta"><span class="j-card-code">'+esc(it.ticket_code||'')+'</span><span class="pri-dot" style="background:'+(it.priority==='critical'?'var(--red)':'var(--orange)')+'"></span><span class="badge unack">Unack</span><span class="j-card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span></div><div class="j-card-title">'+esc(it.title)+'</div>'+(it.description?'<div class="j-card-desc">'+esc(it.description.substring(0,100))+'</div>':'')+'</div>';});
   if(!h)h='<div style="color:var(--tx-d);font-size:12px;padding:8px 0">All clear.</div>';
-  document.getElementById('j-att').innerHTML=h;
+  var att=document.getElementById('j-att');att.innerHTML=h;
+  att.querySelectorAll('.nj-att').forEach(function(c){c.addEventListener('click',openNeedsJason);});
 }
 function renderRecs(){
   var h='';
@@ -776,9 +835,13 @@ function popDomainChips(){
   c.querySelectorAll('.fd-chip').forEach(function(x){x.classList.toggle('active',x.dataset.d===domF);});
 }
 function renderColTabs(){
-  var ct=document.getElementById('col-tabs'),h='';
+  var ct=document.getElementById('col-tabs'),h='',fi=filterItems();
+  /* SB-771: Needs Jason is the first tab whenever anything needs Jason (or for
+     Jason himself); its cards are not counted again under their own status. */
+  if(showLane())h+='<div class="col-tab nj-tab'+(curCol===LANE?' active':'')+'" data-st="'+LANE+'"><span>Needs Jason</span><span class="ct-count">'+fi.filter(inLane).length+'</span></div>';
+  else if(curCol===LANE)curCol='todo';
   STATUSES.forEach(function(st){
-    var n=filterItems().filter(function(i){return i.status===st;}).length;
+    var n=fi.filter(function(i){return i.status===st&&!inLane(i);}).length;
     h+='<div class="col-tab'+(st===curCol?' active':'')+'" data-st="'+st+'" style="'+(st===curCol?'border-bottom-color:'+STAT_COLORS[st]:'')+'"><span>'+STAT_NAMES[st]+'</span><span class="ct-count">'+n+'</span></div>';
   });
   ct.innerHTML=h;
@@ -853,10 +916,11 @@ async function tglAgentAuto(btn){
   btn.disabled=false;
 }
 function renderCards(){
-var filtered=filterItems().filter(function(i){return i.status===curCol;});
-filtered.sort(function(a,b){return a.sort_order-b.sort_order;});
+var lane=curCol===LANE;
+var filtered=filterItems().filter(function(i){return lane?inLane(i):(i.status===curCol&&!inLane(i));});
+if(lane)filtered.sort(laneSort);else filtered.sort(function(a,b){return a.sort_order-b.sort_order;});
 var area=document.getElementById('cards-area'),h='',singleP=curProj!=='all';
-if(!filtered.length)h='<div class="cards-empty">No items in '+STAT_NAMES[curCol]+'</div>';
+if(!filtered.length)h='<div class="cards-empty">'+(lane?'Nothing waiting on Jason':'No items in '+STAT_NAMES[curCol])+'</div>';
 filtered.forEach(function(it){
 var dom=iDom(it),stripe=dom?(DC[dom]||'var(--tx-d)'):'var(--tx-d)';
 var lbs='';if(it.labels&&it.labels.length)it.labels.forEach(function(lb){lbs+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
@@ -890,7 +954,10 @@ if(it.acknowledged===false&&(it.priority==='critical'||it.priority==='high')){h+
 if(!singleP)h+='<span class="card-proj">'+esc((it.project_icon||'')+' '+(it.project_name||''))+'</span>';
 /* SB-204: Status badge (pushed right with margin-left:auto) */
 var _sc=STAT_COLORS[it.status]||'#8b949e';h+='<span class="status-badge" style="color:'+_sc+';background:'+_sc+'26">'+esc(STAT_NAMES[it.status]||it.status)+'</span>';
-h+='</div>';if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
+h+='</div>';
+/* SB-771: in the lane, say why the card is here and for how long. */
+if(lane){var pkg=it.status==='awaiting_jason';h+='<div class="nj-row"><span class="nj-kind'+(pkg?' pkg':'')+'">'+esc(pkg?'Decision package':'Approval only · '+(STAT_NAMES[it.status]||it.status))+'</span>'+(it.waiting_days!=null?'<span class="nj-wait'+(it.aging_breached?' aged':'')+'">'+esc(fmtWait(it.waiting_days))+' waiting</span>':'')+'</div>'+(it.decision_needed?'<div class="nj-decision">'+esc(it.decision_needed)+'</div>':'');}
+if(lbs)h+='<div class="card-labels">'+lbs+'</div>';
 h+='<div class="card-title">'+esc(it.title)+'</div><div class="card-foot"><div class="card-foot-left">'+dueH+cmtH+subH+depH+'</div><div style="display:flex;align-items:center;gap:4px">'+assigneeH+agH+'</div></div></div>';
 });
 area.innerHTML=h;
@@ -904,11 +971,34 @@ el.addEventListener('touchmove',function(){clearTimeout(timer);});
 }
 function openMoveSheet(itemId){moveItem=items.find(function(i){return i.id===itemId;});if(!moveItem)return;
   document.getElementById('move-title').textContent='Move: '+esc((moveItem.ticket_code||'')+' '+(moveItem.title||'').substring(0,30));
-  var h='';STATUSES.forEach(function(st){h+='<button class="move-opt'+(st===moveItem.status?' current':'')+'" data-st="'+st+'"><span class="mo-dot" style="background:'+STAT_COLORS[st]+'"></span>'+STAT_NAMES[st]+'</button>';});
+  /* SB-771: Approve / Reject / Un-approve, each one rpc/decide_work_item call,
+     listed first so a decision is one tap without scrolling past the statuses.
+     Reject asks for its note right here in the sheet, never with a dialog. */
+  var h='',ds=decisionsFor(moveItem);
+  if(ds.length){
+    h+='<div class="move-sec" style="margin-top:0">Decision</div>';
+    ds.forEach(function(d){h+='<button class="move-opt decide-'+d+'" data-decide="'+d+'"><span class="mo-dot" style="background:'+DECIDE_COLORS[d]+'"></span>'+DECIDE_NAMES[d]+'</button>';});
+    if(ds.indexOf('reject')!==-1)h+='<div class="move-reject" id="move-reject" style="display:none"><input id="move-reject-note" placeholder="Why not, in one line" maxlength="400" enterkeyhint="send"><button class="btn btn-del" id="move-reject-go" style="margin-right:0">Reject</button></div>';
+    h+='<div class="move-sec">Move to</div>';
+  }
+  moveTargets(moveItem).forEach(function(st){h+='<button class="move-opt'+(st===moveItem.status?' current':'')+'" data-st="'+st+'"><span class="mo-dot" style="background:'+STAT_COLORS[st]+'"></span>'+STAT_NAMES[st]+'</button>';});
   document.getElementById('move-opts').innerHTML=h;
   document.getElementById('move-bg').classList.add('open');
   document.getElementById('move-sheet').classList.add('open');
-  document.querySelectorAll('.move-opt').forEach(function(b){b.addEventListener('click',async function(){
+  var dItem=moveItem;
+  document.querySelectorAll('.move-opt[data-decide]').forEach(function(b){b.addEventListener('click',function(){
+    var d=b.dataset.decide;
+    if(d==='reject'){var r=document.getElementById('move-reject');r.style.display='flex';document.getElementById('move-reject-note').focus();return;}
+    runDecision(dItem,d,null);
+  });});
+  var rg=document.getElementById('move-reject-go');
+  if(rg){
+    var submitReject=function(){var n=document.getElementById('move-reject-note'),note=n.value.trim();if(!note){n.classList.add('err');n.focus();return;}runDecision(dItem,'reject',note);};
+    rg.addEventListener('click',submitReject);
+    document.getElementById('move-reject-note').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();submitReject();}});
+    document.getElementById('move-reject-note').addEventListener('input',function(){this.classList.remove('err');});
+  }
+  document.querySelectorAll('.move-opt[data-st]').forEach(function(b){b.addEventListener('click',async function(){
     if(b.dataset.st===moveItem.status){closeMoveSheet();return;}
     if(offlineGuard()){closeMoveSheet();return;}
     try{var h=await hdr();var r=await fetch(SB_URL+'/rest/v1/rpc/move_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:moveItem.id,p_new_status:b.dataset.st,p_new_sort_order:0})});if(!r.ok)throw new Error(await r.text());
@@ -918,6 +1008,44 @@ function openMoveSheet(itemId){moveItem=items.find(function(i){return i.id===ite
   });});
 }
 function closeMoveSheet(){document.getElementById('move-bg').classList.remove('open');document.getElementById('move-sheet').classList.remove('open');moveItem=null;}
+
+/* SB-771: one decision = one rpc/decide_work_item call, never a PATCH. The RPC
+   applies the status rule (approve backlog → todo, reject → on_hold); the board
+   is then re-read so the card shows what the server stored. A refusal is shown
+   exactly as the database wrote it. */
+async function dbMessage(r){var raw='';try{raw=await r.text();}catch(e){}var m='';try{var b=JSON.parse(raw);m=b.message||b.error_description||b.error||b.hint||'';}catch(e){}return m||('Decision failed (HTTP '+r.status+')');}
+async function runDecision(it,d,note){
+  if(deciding||!it)return;
+  if(offlineGuard())return;
+  deciding=true;
+  try{
+    var h=await hdr();
+    var r=await fetch(SB_URL+'/rest/v1/rpc/decide_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:it.id,p_decision:d,p_note:note})});
+    if(!r.ok)throw new Error(await dbMessage(r));
+    var out=await r.json()||{};
+    closeMoveSheet();
+    toast((out.ticket_code||it.ticket_code||'Item')+' '+(DECIDE_PAST[out.decision||d]||d)+' — now '+(STAT_NAMES[out.status]||out.status||'unchanged'),'success',4000);
+    await loadAll();
+  }catch(e){toast(e.message,'error',8000);}
+  deciding=false;
+}
+
+/* Header badge: N = needs_jason rows (equal to the decision digest), amber when
+   any has breached its aging limit, hidden at zero. Also the home-screen icon
+   badge where the platform supports it. */
+function renderNjBadge(){
+  var nj=items.filter(function(i){return i.needs_jason===true;}),b=document.getElementById('nj-badge');
+  document.getElementById('nj-count').textContent=nj.length;
+  b.classList.toggle('aged',nj.some(function(i){return i.aging_breached===true;}));
+  b.style.display=nj.length?'inline-flex':'none';
+  try{if(nj.length&&navigator.setAppBadge)navigator.setAppBadge(nj.length).catch(function(){});else if(!nj.length&&navigator.clearAppBadge)navigator.clearAppBadge().catch(function(){});}catch(e){}
+}
+function openNeedsJason(){
+  document.querySelector('.nav-btn[data-tab="board"]').click();
+  curCol=LANE;renderColTabs();renderCards();
+  var t=document.querySelector('.col-tab[data-st="'+LANE+'"]');if(t&&t.scrollIntoView)t.scrollIntoView({inline:'start',block:'nearest'});
+}
+document.getElementById('nj-badge').addEventListener('click',openNeedsJason);
 document.getElementById('move-cancel').addEventListener('click',closeMoveSheet);
 document.getElementById('move-bg').addEventListener('click',closeMoveSheet);
 
@@ -1002,10 +1130,17 @@ document.getElementById('pa-tgl').addEventListener('click',async function(){
 document.getElementById('b-search').addEventListener('input',function(){search=this.value;renderBoardContent();});
 
 /* Modal */
+/* SB-771: Awaiting Jason in the modal's status list for L2+ cards (and for a
+   card already there, so the select never shows a blank and saves ''). */
+function syncAwaitingOpt(it){
+  var sel=document.getElementById('m-status'),o=document.getElementById('m-opt-awaiting');if(o)o.remove();
+  if(it&&(it.authority_level>=2||it.status==='awaiting_jason')){o=document.createElement('option');o.id='m-opt-awaiting';o.value='awaiting_jason';o.textContent=STAT_NAMES.awaiting_jason;sel.insertBefore(o,sel.querySelector('option[value="done"]'));}
+}
 function openNewModal(st){
   editItem=null;document.getElementById('m-title').textContent='New Item';
   document.getElementById('m-name').value='';document.getElementById('m-desc').value='';
-  document.getElementById('m-status').value=st||'backlog';document.getElementById('m-pri').value='medium';
+  syncAwaitingOpt(null);
+  document.getElementById('m-status').value=(st&&st!==LANE)?st:'backlog';document.getElementById('m-pri').value='medium';
   document.getElementById('m-due').value='';document.getElementById('m-assignee').value='';document.getElementById('m-ticket-badge').style.display='none';document.getElementById('m-type-badge').style.display='none';document.getElementById('m-timestamps').style.display='none';document.getElementById('m-status-dot').style.background=STAT_COLORS['backlog']||'#8b949e';
   if(curProj!=='all')document.getElementById('m-proj').value=curProj;
   document.getElementById('btn-del').style.display='none';document.getElementById('cmt-s').style.display='none';
@@ -1015,6 +1150,7 @@ async function openModal(itemId){
   var it=items.find(function(i){return i.id===itemId;});if(!it)return;editItem=it;
   document.getElementById('m-title').textContent=it.title?'Edit':'New Item';if(it.ticket_code){var tb=document.getElementById('m-ticket-badge');tb.textContent=it.ticket_code;tb.style.display='inline';}else{document.getElementById('m-ticket-badge').style.display='none';}var _mtb=document.getElementById('m-type-badge');if(it.type&&it.type!=='task'){var _mtc={bug:'modal-type-bug',user_story:'modal-type-story',epic:'modal-type-epic'};var _mtn={bug:'Bug',user_story:'Story',epic:'Epic'};_mtb.className='modal-type-badge '+(_mtc[it.type]||'');_mtb.textContent=_mtn[it.type]||it.type;_mtb.style.display='inline';}else{_mtb.style.display='none';}
   document.getElementById('m-name').value=it.title||'';document.getElementById('m-desc').value=it.description||'';
+  syncAwaitingOpt(it);
   document.getElementById('m-proj').value=it.project_id;document.getElementById('m-status').value=it.status;
   document.getElementById('m-pri').value=it.priority;document.getElementById('m-assignee').value=it.assignee||'';document.getElementById('m-due').value=it.due_date||'';
   document.getElementById('btn-del').style.display='inline-flex';var _sd=document.getElementById('m-status-dot');_sd.style.background=STAT_COLORS[it.status]||'#8b949e';

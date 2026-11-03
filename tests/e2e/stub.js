@@ -108,6 +108,10 @@ async function installStubs(page, payload = PAYLOAD) {
   });
 
   await page.route('**/rest/v1/**', (route) => {
+    // SB-771: is_jason_session is a read that PostgREST serves as POST. The QA
+    // fixture user is not the approver, so it answers false, exactly as the
+    // live function would for that login.
+    if (route.request().url().includes('/rpc/is_jason_session')) return json(route, false);
     if (route.request().method() !== 'GET') {
       // Batches 1 and 2 are read-only: a write here means a test did something
       // it should not, and the 405 makes that loud instead of silent.
