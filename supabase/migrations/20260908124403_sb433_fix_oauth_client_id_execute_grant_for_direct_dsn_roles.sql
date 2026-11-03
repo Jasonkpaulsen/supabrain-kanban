@@ -1,0 +1,21 @@
+-- SB-433 (regression from SB-409)
+--
+-- public.oauth_client_guard_immutable() is a BEFORE trigger on 15 tables and is
+-- executable by PUBLIC, as it must be: every writer to those tables has to be able
+-- to run it. Its first statement calls public.oauth_client_id(), which SB-409
+-- granted only to postgres / authenticated / service_role.
+--
+-- Any role outside that set — notably the classroom_writer login role the
+-- classroom-mcp sync connects with over a direct DSN — can enter the trigger but
+-- cannot evaluate its first line, so every INSERT fails with
+--   InsufficientPrivilege: permission denied for function oauth_client_id
+-- The nightly classroom-daily-sync has failed this way since 2026-09-07 19:15Z.
+--
+-- oauth_client_id() returns the CALLER'S OWN JWT client_id claim and nothing else:
+--   select nullif(auth.jwt() ->> 'client_id', '')
+-- auth.jwt() is itself already granted to PUBLIC, so matching the guard's own
+-- PUBLIC grant exposes no information that PUBLIC cannot already read. For a
+-- direct-DSN role there is no JWT at all, so the call returns null and the guard
+-- early-returns — which is the behaviour SB-409 intended for non-OAuth writers.
+
+grant execute on function public.oauth_client_id() to public;;
