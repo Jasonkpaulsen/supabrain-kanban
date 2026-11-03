@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# SB-446 — stop a credential at the commit, not at the incident review.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+#
+# SB-440 was a live token committed into a migration in this PUBLIC repository
+# by a model, where it sat for weeks. It was found by a QA definition pull, not
+# by review. This hook is the cheap place to catch the next one.
+#
+# It is a convenience, not the control: hooks are per-clone and skippable with
+# --no-verify. The CI job is the control.
+
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "pre-commit: python3 not found; skipping the secret scan." >&2
+  exit 0
+fi
+
+python3 "$ROOT/scripts/secret-scan.py" --staged || {
+  echo ""
+  echo "pre-commit: refusing this commit."
+  echo "If the finding is genuinely not a credential, add its fingerprint for that"
+  echo "path to .secret-scan-allow.json with a reason — do not use --no-verify, and"
+  echo "do not paste the value anywhere."
+  exit 1
+}
