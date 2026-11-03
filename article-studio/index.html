@@ -110,7 +110,8 @@
   .imgrid{display:grid;grid-template-columns:1fr;gap:11px;margin-top:8px}
   .imgcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .imgcard img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
-  .imgcap{font-size:11.5px;color:var(--muted);padding:7px 10px}
+  .imgcap{font-size:11.5px;color:var(--muted);padding:7px 10px;overflow-wrap:anywhere}
+  a.imgopen{display:block}
   .imgacts{display:flex;gap:6px;padding:0 10px 10px}.imgacts button{flex:1;font-size:13px;padding:8px 4px;min-height:44px}
   /* LCE-021: swipeable gallery. Each card is nearly full width; the next one peeks so the swipe is discoverable. */
   .gallery{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:none;margin-top:8px;padding-bottom:2px}
@@ -120,7 +121,7 @@
   .galpos{display:flex;justify-content:center;gap:6px;margin-top:8px}
   .galpos i{width:7px;height:7px;border-radius:50%;background:var(--line);display:block}.galpos i.on{background:var(--gold)}
   .imgtools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.imgtools button{min-height:44px}
-  .imgreq{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:8px 0}
+  .imgreq{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:8px 0;overflow-wrap:anywhere}
   .imgreq.err{color:var(--red);border-color:#4a2a2a}
   .btn-tap{min-height:44px;min-width:44px}
 
@@ -363,6 +364,11 @@ const IMG_RUNS='9 AM, 1 PM and 6 PM';
 let IMG_POLL=null,IMG_WAIT=null;
 // Draw only into the sheet of the article that asked: the sheet may have closed or moved on during an await.
 const imgZoneFor=(articleId)=>CURRENT&&CURRENT.id===articleId?document.getElementById('imgZone'):null;
+// Tap an image to open it full size. A plain link, not an inline onclick: a quote in public_url decodes back
+// out of esc() inside a JS handler and runs as script (QA10). Only http(s) URLs are linked.
+const safeUrl=(u)=>/^https?:\/\//i.test(u||'')?u:'#';
+const openImg=(url,inner)=>`<a class="imgopen" href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
+let HEADER_BUSY=false;
 function gallery(cards,n){return `<div class="gallery" onscroll="galScroll(this)">${cards}</div>`+(n>1?`<div class="galpos" aria-hidden="true">${Array.from({length:n},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')}</div>`:'');}
 function galScroll(el){const c=el.firstElementChild;if(!c)return;const i=Math.round(el.scrollLeft/(c.offsetWidth+10));const d=el.nextElementSibling;if(d&&d.classList.contains('galpos'))[...d.children].forEach((x,k)=>x.classList.toggle('on',k===i));}
 async function loadArticleImages(articleId){
@@ -383,7 +389,7 @@ async function loadArticleImages(articleId){
   else if(req&&req.status==='failed')html+=`<div class="imgreq err" id="imgReq">Last request failed: ${esc(req.error||'unknown error')}. Request again below.</div>`;
   if(cands.length){
     html+=`<div class="muted" style="font-size:12px;margin:8px 0 4px">${cands.length} candidate${cands.length>1?'s':''}${cands.length>1?' — swipe to compare.':'.'} Accept one, save or reject the rest.</div>`;
-    html+=gallery(cands.map(c=>`<div class="imgcard"><img src="${esc(c.public_url)}" alt="${esc(c.description||'Candidate image')}" onclick="window.open('${esc(c.public_url)}','_blank')"><div class="imgcap">${esc(c.description||'')}</div><div class="imgacts"><button class="btn-gold" onclick="acceptImage('${c.id}','${articleId}')">Accept</button><button class="btn-ghost" onclick="saveImage('${c.id}')">Save</button><button class="btn-danger" onclick="rejectImage('${c.id}')">Reject</button></div></div>`).join(''),cands.length);
+    html+=gallery(cands.map(c=>`<div class="imgcard">${openImg(c.public_url,`<img src="${esc(c.public_url)}" alt="${esc(c.description||'Candidate image')}">`)}<div class="imgcap">${esc(c.description||'')}</div><div class="imgacts"><button class="btn-gold" onclick="acceptImage('${c.id}','${articleId}')">Accept</button><button class="btn-ghost" onclick="saveImage('${c.id}')">Save</button><button class="btn-danger" onclick="rejectImage('${c.id}')">Reject</button></div></div>`).join(''),cands.length);
   }else if(!hero&&!waiting){html+='<div class="muted" style="font-size:12px;margin:6px 0">No images yet. Request a set below.</div>';}
   html+=`<textarea id="imgfb" rows="2" style="margin-top:9px" placeholder="Feedback for a new set (brighter, less literal, no text…)"></textarea>
    <div class="imgtools"><button class="btn-ghost" id="reqBtn" onclick="requestNewImages('${articleId}')" ${waiting?'disabled':''}>${waiting?'⏳ Set requested':'✨ Request set'}</button><button class="btn-ghost" onclick="openLibraryPicker('${articleId}')">🖼 Use saved</button></div><div id="libPick"></div>`;
@@ -393,7 +399,8 @@ async function loadArticleImages(articleId){
 }
 // SB-636 (ported from PR 10): one RPC, one transaction: demote the old header, accept this image, point the
 // article at it. A library image is copied (SB-643), so it stays in the library for reuse.
-async function setHeader(id,articleId){const {error}=await sb.rpc('set_article_header',{p_article_id:articleId,p_image_id:id});if(error){toast('Header not changed: '+error.message);return false;}toast('Set as header');loadArticleImages(articleId);return true;}
+// A second tap while the first header change is in flight is ignored (QA03/QA05).
+async function setHeader(id,articleId){if(HEADER_BUSY)return false;HEADER_BUSY=true;try{const {error}=await sb.rpc('set_article_header',{p_article_id:articleId,p_image_id:id});if(error){toast('Header not changed: '+error.message);return false;}toast('Set as header');loadArticleImages(articleId);return true;}finally{HEADER_BUSY=false;}}
 async function acceptImage(id,articleId){await setHeader(id,articleId);}
 // SB-636 (ported from PR 10): capture the article before any await and check the row really changed
 // (RLS hides a row it will not update without returning an error).
@@ -435,7 +442,7 @@ function renderAgenda(){
     h+=`<div class="day"><h4>${dn[i]}</h4><div class="date">${d.getDate()}</div>${best.map(s=>`<span class="best">${s.h>12?s.h-12:s.h}:${String(s.m).padStart(2,'0')} ${s.h>=12?'PM':'AM'} ${s.tier}</span>`).join('')}${evs.map(a=>`<div class="ev" onclick="openSheet('${a.id}')"><div class="t">${tm(a.scheduled_for)}</div>${esc(a.title)}</div>`).join('')}</div>`;}
   document.getElementById('agenda').innerHTML=h;
 }
-async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').in('status',LIB_STATUSES).order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card"><img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" onclick="window.open('${esc(i.public_url)}','_blank')"><div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger btn-tap" style="padding:7px 14px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
+async function renderLibrary(){const {data,error}=await sb.from('image_assets').select('*').in('status',LIB_STATUSES).order('updated_at',{ascending:false});const g=document.getElementById('libGrid');if(error){g.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const imgs=data||[];if(!imgs.length){g.innerHTML='<div class="empty">No saved images yet.</div>';return;}g.innerHTML=imgs.map(i=>`<div class="card">${openImg(i.public_url,`<img src="${esc(i.public_url)}" class="thumb" style="margin-top:0" alt="${esc(i.description||i.prompt||'Saved image')}">`)}<div class="imgcap" style="padding:8px 0">${esc(i.description||i.prompt||'Saved image')}</div><div class="foot"><span class="meta">${i.article_id?'from an article':'library'}</span><button class="btn-danger btn-tap" style="padding:7px 14px" onclick="deleteImage('${i.id}')">Delete</button></div></div>`).join('');}
 async function deleteImage(id){if(!confirm('Permanently delete this image?'))return;const {data}=await sb.from('image_assets').select('storage_path,description').eq('id',id).single();await deleteStorage([data&&data.storage_path]);const {error}=await sb.from('image_assets').delete().eq('id',id);if(error){toast(error.message);return;}await logPurge([{entity_type:'image',entity_id:id,storage_path:data&&data.storage_path,title:data&&data.description,reason:'manual_delete'}]);toast('Deleted');renderLibrary();}
 async function renderPurged(){const {data,error}=await sb.from('lce_deletion_log').select('*').order('purged_at',{ascending:false}).limit(200);const el=document.getElementById('purgedList');if(error){el.innerHTML='<div class="empty">'+esc(error.message)+'</div>';return;}const rows=data||[];if(!rows.length){el.innerHTML='<div class="empty">Nothing purged yet.</div>';return;}const rs={auto_purge:'Auto-purge (30d)',manual_empty_trash:'Emptied trash',manual_delete:'Manual delete'};const ic={article:'📄',image:'🖼',image_request:'✨'};el.innerHTML=rows.map(r=>`<div style="display:flex;gap:11px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">${ic[r.entity_type]||'•'}</span><div style="flex:1"><div style="font-size:13px">${esc(r.title||r.storage_path||r.entity_type)}</div><div class="meta" style="font-size:11px">${esc(r.entity_type)} · ${esc(rs[r.reason]||r.reason||'')}</div></div><div class="meta" style="font-size:11px">${fmt(r.purged_at)}</div></div>`).join('');}
 

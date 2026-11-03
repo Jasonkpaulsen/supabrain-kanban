@@ -98,6 +98,7 @@ async function install(page, opts = {}) {
     const table = new URL(url).pathname.split('/rest/v1/')[1];
 
     if (table === 'rpc/set_article_header') {
+      if (opts.rpcDelay) await new Promise((r) => setTimeout(r, opts.rpcDelay));
       if (opts.failRpc) return json(route, { message: 'set_article_header: article not updated', code: '42501' }, 400);
       try { return json(route, setArticleHeader(body)); } catch (e) { return json(route, { message: e.message }, 400); }
     }
@@ -315,5 +316,56 @@ test.describe('LCE-021 Article Studio image curation @lce021', () => {
     await expect(page.locator('#imgZone img[src*="/c1.png"], #imgZone img[src*="/c2.png"], #imgZone img[src*="/c3.png"]')).toHaveCount(0);
     await expect(page.locator('#imgZone')).toContainText('No images yet');
     expect(be.calls('GET', `article_id=eq.${A1}`).length).toBeGreaterThan(0);
+  });
+
+  // QA follow-ups (TC-LCE021-QA03/05/10/12/13).
+  test('TC-LCE021-V12 a long unbroken request error wraps instead of scrolling the sheet sideways', async ({ page }) => {
+    const be = await install(page);
+    be.state.image_requests.push({ id: 'rf', article_id: A2, status: 'failed', created_at: '2026-11-03T10:00:00Z',
+      error: 'upload failed https://hzqqvbvhnzmgqivfigej.supabase.co/functions/v1/lce-image-ingest?path=' + 'x'.repeat(220) });
+    await signIn(page);
+    await openArticle(page, 'Context Is the New');
+    await expect(page.locator('#imgReq.err')).toBeVisible();
+    const w = await page.locator('#sheet .sbody').evaluate((el) => ({ s: el.scrollWidth, c: el.clientWidth }));
+    expect(w.s).toBeLessThanOrEqual(w.c);
+    await noHorizontalScroll(page);
+  });
+
+  test('TC-LCE021-V13 a quote in an image URL cannot run script when the image is tapped', async ({ page, context }) => {
+    const be = await install(page);
+    const evil = "https://example.test/x.png');window.__pwned=1;('";
+    be.state.image_assets.find((i) => i.id === 'c1').public_url = evil;
+    be.state.image_assets.find((i) => i.id === 'l1').public_url = evil;
+    await signIn(page);
+    await openArticle(page, 'Forty Things');
+    await expect(page.locator('#imgZone [onclick*="window.open"]')).toHaveCount(0);
+    context.on('page', (p) => p.close().catch(() => {}));
+    await page.locator('#imgZone .gallery .imgcard').first().locator('a.imgopen').tap();
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    await page.locator('#sheet .shead button').tap();
+    await page.locator('#n-lib').tap();
+    await expect(page.locator('#libGrid [onclick*="window.open"]')).toHaveCount(0);
+    await page.locator('#libGrid a.imgopen').first().tap();
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    // Non-http(s) URLs are not linked at all.
+    expect(await page.evaluate(() => safeUrl('javascript:alert(1)'))).toBe('#');
+  });
+
+  test('TC-LCE021-V14 a long unbroken caption does not scroll the Library sideways', async ({ page }) => {
+    const be = await install(page);
+    be.state.image_assets.find((i) => i.id === 'l1').description = 'caption-' + 'y'.repeat(240);
+    await signIn(page);
+    await page.locator('#n-lib').tap();
+    await expect(page.locator('#libGrid .card')).toHaveCount(3);
+    await noHorizontalScroll(page);
+  });
+
+  test('TC-LCE021-V15 a double tap on Accept sends one header change', async ({ page }) => {
+    const be = await install(page, { rpcDelay: 400 });
+    await signIn(page);
+    await openArticle(page, 'Forty Things');
+    await page.evaluate((a) => Promise.all([acceptImage('c1', a), acceptImage('c1', a)]), A1);
+    await expect(toast(page)).toHaveText('Set as header');
+    expect(be.calls('POST', '/rpc/set_article_header')).toHaveLength(1);
   });
 });
