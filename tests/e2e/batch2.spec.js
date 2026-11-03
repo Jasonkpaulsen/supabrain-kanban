@@ -8,7 +8,8 @@ const {
 const { withBulk, BULK_TOTALS, EDGE } = require('./fixtures/bulk');
 const { PAYLOAD, LIVE, installStubs } = require('./stub');
 
-const ALL_STATUSES = ['backlog', 'todo', 'in_progress', 'on_hold', 'blocked', 'review', 'escalated', 'done'];
+// SB-565: Cancelled is a ninth, terminal column (ADR-FLOW-004).
+const ALL_STATUSES = ['backlog', 'todo', 'in_progress', 'on_hold', 'blocked', 'review', 'escalated', 'done', 'cancelled'];
 
 const visibleColumns = (page) =>
   page.locator('.column').evaluateAll((els) =>
