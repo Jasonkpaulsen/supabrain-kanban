@@ -28,7 +28,7 @@ const idFromEq = (url, param) => {
   return m ? m.replace(/^eq\./, '') : null;
 };
 
-function createBackend(seed = BASE) {
+function createBackend(seed = BASE, opts = {}) {
   const state = {
     projects: clone(seed.projects),
     labels: clone(seed.labels),
@@ -37,6 +37,9 @@ function createBackend(seed = BASE) {
     comments: [],
     labelLinks: [],
     requests: [],
+    // SB-771: what rpc/is_jason_session answers. Off by default, so every
+    // existing batch-3 board renders exactly as a non-approver session would.
+    isJason: opts.isJason === true,
   };
 
   // Seed label links from the payload's inline labels so edits can unlink them.
@@ -70,8 +73,53 @@ function createBackend(seed = BASE) {
   return { state, relabel, newItem };
 }
 
-async function installWriteStubs(page, seed) {
-  const backend = createBackend(seed);
+// SB-770 status rules for the board decision path, as approval_decision_target
+// states them. Like the rest of this stub it is NOT the database: it exists so
+// the browser test can see the card land where the server would put it. The
+// real rules and refusals are covered by TC-SB770-V1..V15 in SQL.
+const PRE_ACTIVE = ['backlog', 'todo', 'on_hold', 'awaiting_jason'];
+const pgError = (code, message) => ({ code, message, details: null, hint: null });
+
+function decide(state, body) {
+  const it = state.items.find((i) => i.id === body.p_item_id);
+  if (!it) return [404, pgError('P0002', `SB-770: work item ${body.p_item_id} not found for this login`)];
+  if (!state.isJason) {
+    return [403, pgError('42501', "SB-770: decide_work_item is only for Jason's own Kanban login. JARVIS records a chat decision with decide_work_item_chat.")];
+  }
+  const d = String(body.p_decision || '').trim().toLowerCase();
+  const note = String(body.p_note || '').trim();
+  if (!['approve', 'reject', 'unapprove'].includes(d)) return [400, pgError('22023', `SB-770: decision must be approve, reject or unapprove (got ${d})`)];
+  if (d === 'reject' && !note) return [400, pgError('22023', 'SB-770: Reject needs a one-line note')];
+  const from = it.status;
+  if (d === 'approve') {
+    if (it.approval_status === 'approved') return [400, pgError('22023', 'SB-770: already approved, nothing to do')];
+    it.status = (from === 'backlog' || from === 'awaiting_jason') ? 'todo' : from;
+    it.approval_status = 'approved'; it.approved_by = 'Jason Paulsen';
+  } else if (d === 'reject') {
+    if (it.approval_status === 'rejected') return [400, pgError('22023', 'SB-770: already rejected, nothing to do')];
+    if (['backlog', 'todo', 'awaiting_jason'].includes(from)) { it.status = 'on_hold'; it.hold_reason = `Rejected by Jason: ${note}`; }
+    it.approval_status = 'rejected'; it.approved_by = 'Jason Paulsen';
+  } else {
+    if (!['approved', 'rejected'].includes(it.approval_status)) return [400, pgError('22023', `SB-770: un-approve needs an approved or rejected item (approval is ${it.approval_status})`)];
+    if (!PRE_ACTIVE.includes(from)) return [400, pgError('22023', `SB-770: un-approve is allowed only in backlog, todo, on_hold or awaiting_jason (SB-275 pre-active columns), not ${from}`)];
+    if ((it.authority_level ?? 2) >= 2) it.status = 'awaiting_jason';
+    it.approval_status = 'pending'; it.approved_by = null;
+  }
+  it.approved_at = it.approved_by ? new Date().toISOString() : null;
+  // kanban_board_view's needs_jason, recomputed so the next loadAll() sees it.
+  it.needs_jason = it.status === 'awaiting_jason'
+    || ((it.authority_level ?? 0) >= 2 && it.approval_status === 'pending' && !['done', 'cancelled'].includes(it.status));
+  it.needs_jason_kind = it.status === 'awaiting_jason' ? 'decision_package' : (it.needs_jason ? 'approval_only' : null);
+  if (!it.needs_jason) { it.aging_breached = false; it.waiting_days = null; }
+  return [200, {
+    ticket_code: it.ticket_code, decision: d, channel: 'kanban', from_status: from, status: it.status,
+    approval_status: it.approval_status, approved_by: it.approved_by, approved_at: it.approved_at,
+    hold_reason: it.hold_reason || null,
+  }];
+}
+
+async function installWriteStubs(page, seed, opts = {}) {
+  const backend = createBackend(seed, opts);
   // Live mode: batch 3 mutates, so it must NOT be pointed at the real project
   // by accident. Refuse loudly rather than writing to production data.
   if (process.env.E2E_LIVE === '1') {
@@ -116,6 +164,13 @@ async function installWriteStubs(page, seed) {
       it.sort_order = body.p_new_sort_order;
       if (body.p_new_status === 'done') it.completed_at = new Date().toISOString();
       return json(route, null);
+    }
+
+    // ── RPC: is_jason_session / decide_work_item (SB-770, used by SB-771) ──
+    if (url.includes('/rpc/is_jason_session')) return json(route, state.isJason);
+    if (url.includes('/rpc/decide_work_item')) {
+      const [status, out] = decide(state, body || {});
+      return json(route, out, status);
     }
 
     // ── work_items ──

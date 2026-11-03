@@ -21,8 +21,11 @@ function findChromium() {
     .filter((d) => /^chromium-\d+$/.test(d))
     .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))[0];
   if (!build) return undefined;
-  const bin = path.join(root, build, 'chrome-linux', 'chrome');
-  return fs.existsSync(bin) ? bin : undefined;
+  // Newer images unpack Chromium as chrome-linux64/; older ones as chrome-linux/.
+  const bin = ['chrome-linux64', 'chrome-linux']
+    .map((d) => path.join(root, build, d, 'chrome'))
+    .find((p) => fs.existsSync(p));
+  return bin;
 }
 
 const CHROMIUM = findChromium();
@@ -40,6 +43,13 @@ module.exports = defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     viewport: { width: 1600, height: 1000 },
     screenshot: 'only-on-failure',
+    // jarvis-pwa.html registers sw.js, which claims the page and then fetches
+    // on its behalf. page.route() never sees those requests, so the stub was
+    // bypassed and the PWA board loaded empty: that is why most of
+    // cards.spec.js failed (27 of 30 on main, a different subset each run).
+    // The service worker is not under test here; sw.js is checked by
+    // TC-SB771-V11 and the update flow manually on the phone.
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
   },
   projects: [{

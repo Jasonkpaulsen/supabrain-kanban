@@ -321,6 +321,32 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .loading { text-align: center; padding: 80px 20px; color: var(--text-muted); font-size: 15px; }
 .add-card-btn { width: 100%; padding: 8px; background: transparent; border: 1px dashed var(--card-border); border-radius: 8px; color: var(--text-dim); font-size: 13px; cursor: pointer; transition: all 0.15s; margin-top: 4px; }
 .add-card-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(88,166,255,0.05); }
+
+/* SB-771 — Needs Jason: header badge, the lane, and the decision controls.
+   The lane borrows the column's look but is deliberately NOT a .column: it is
+   not a status, so it is never a drop target and never counted as one. */
+.nj-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(248,81,73,0.45); background: rgba(248,81,73,0.14); color: var(--accent-red); cursor: pointer; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+.nj-badge b { background: var(--accent-red); color: #fff; border-radius: 9px; padding: 0 7px; font-size: 11px; }
+.nj-badge.aged { border-color: rgba(210,153,34,0.5); background: rgba(210,153,34,0.14); color: var(--accent-orange); }
+.nj-badge.aged b { background: var(--accent-orange); color: #000; }
+.nj-lane { background: var(--surface); border: 1px solid rgba(248,81,73,0.45); border-radius: var(--radius); width: 300px; min-width: 300px; flex-shrink: 0; flex-direction: column; max-height: calc(100vh - 240px); }
+.nj-lane .column-title { color: var(--accent-red); }
+.nj-lane .card { cursor: pointer; }
+.nj-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.nj-kind { font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: var(--surface); border: 1px solid var(--card-border); color: var(--text-muted); font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; }
+.nj-kind.pkg { border-color: rgba(248,81,73,0.5); color: var(--accent-red); }
+.nj-wait { font-size: 11px; color: var(--text-dim); }
+.nj-wait.aged { color: var(--accent-orange); font-weight: 600; }
+.nj-approve { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 20px; border: 1px solid rgba(63,185,80,0.45); background: rgba(63,185,80,0.12); color: var(--accent-green); cursor: pointer; font-family: inherit; }
+.nj-approve:hover { background: rgba(63,185,80,0.22); }
+.nj-approve:disabled { opacity: 0.5; cursor: wait; }
+.nj-decision { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.j-att-badge.nj { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+.j-att-badge.nj.aged { background: rgba(210,153,34,0.15); color: var(--accent-orange); }
+#status-chips .chip[data-status="needs_jason"].active { background: var(--accent-red); border-color: var(--accent-red); }
+.reject-wrap { display: flex; gap: 8px; align-items: center; }
+.reject-wrap input { flex: 1; }
+.reject-wrap input.err { border-color: var(--accent-red); }
 </style>
 </head>
 <body>
@@ -348,6 +374,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="g-tab" data-tab="board">Board</div>
     </div>
     <div class="g-header-right">
+      <button class="nj-badge" id="nj-badge" style="display:none" title="Items waiting on Jason — click to see them">Needs Jason <b id="nj-count">0</b></button>
       <div class="g-status"><span class="dot"></span>Systems Nominal</div>
       <div class="g-avatar" id="btn-logout" title="Sign out">&#128100;</div>
     </div>
@@ -411,7 +438,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="util-scroll-wrap" id="util-scroll-wrap"><div class="util-grid" id="util-grid"></div></div>
     </div>
     <div class="filter-bar">
-      <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span></div>
+      <div class="filter-group" id="status-chips"><span class="grp-label">Status</span><span class="chip active" data-status="all" style="background:var(--card-bg)">All</span><span class="chip" data-status="needs_jason" id="chip-needs-jason" style="display:none">Needs Jason</span><span class="chip" data-status="backlog">Backlog</span><span class="chip" data-status="todo">To Do</span><span class="chip" data-status="in_progress">In Progress</span><span class="chip" data-status="on_hold">On Hold</span><span class="chip" data-status="blocked">Blocked</span><span class="chip" data-status="review">Review</span><span class="chip" data-status="escalated">Escalated</span><span class="chip" data-status="done">Done</span></div>
       <div class="filter-group" id="domain-chips"><span class="grp-label">Domain</span><span class="chip active" data-domain="all" style="background:var(--card-bg)">All</span></div>
       <div class="filter-group" id="archived-chips"><span class="grp-label">Archived</span><span class="chip" id="chip-archived">Show archived</span></div>
       <select class="filter-select" id="priority-filter"><option value="all">All priorities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
@@ -424,6 +451,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     </div>
     <div id="loading" class="loading">Loading ecosystem data...</div>
     <div class="board" id="board" style="display:none">
+      <div class="nj-lane" id="nj-lane" style="display:none"><div class="column-header"><span class="column-title">Needs Jason</span><span class="column-count" id="count-needs_jason">0</span></div><div class="column-body" id="col-needs_jason"></div></div>
       <div class="column col-backlog" data-status="backlog"><div class="column-header"><span class="column-title">Backlog</span><span class="column-count" id="count-backlog">0</span></div><div class="column-body" id="col-backlog"></div></div>
       <div class="column col-todo" data-status="todo"><div class="column-header"><span class="column-title">To Do</span><span class="column-count" id="count-todo">0</span></div><div class="column-body" id="col-todo"></div></div>
       <div class="column col-in_progress" data-status="in_progress"><div class="column-header"><span class="column-title">In Progress</span><span class="column-count" id="count-in_progress">0</span></div><div class="column-body" id="col-in_progress"></div></div>
@@ -444,6 +472,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <div class="modal-row"><div class="modal-field"><label>Title</label><input id="m-title" placeholder="What needs to be done?"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Description</label><textarea id="m-desc" placeholder="Details, context, acceptance criteria..."></textarea></div></div>
       <div class="modal-row"><div class="modal-field"><label>Project</label><select id="m-project"></select></div><div class="modal-field"><label>Status</label><div class="status-select-wrap"><span class="status-dot" id="m-status-dot"></span><select id="m-status"><option value="backlog">Backlog</option><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="on_hold">On Hold</option><option value="blocked">Blocked</option><option value="review">Review</option><option value="escalated">Escalated</option><option value="done">Done</option></select></div></div></div>
+      <div class="modal-row" id="m-reject-row" style="display:none"><div class="modal-field"><label>Reject — one-line note (required)</label><div class="reject-wrap"><input id="m-reject-note" placeholder="Why not, in one line" maxlength="400"><button class="btn btn-delete" id="m-reject-go">Reject</button><button class="btn" id="m-reject-cancel">Keep</button></div></div></div>
       <div class="modal-row"><div class="modal-field"><label>Priority</label><select id="m-priority"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div><div class="modal-field"><label>Assignee</label><input id="m-assignee" placeholder="Who?"></div><div class="modal-field"><label>Due Date</label><input type="date" id="m-due"></div></div>
       <div class="modal-row"><div class="modal-field"><label>Labels</label><div class="modal-labels" id="m-labels"></div></div></div>
       <div class="comments-section" id="comments-section" style="display:none"><h3>Comments</h3><div id="comments-list"></div><div class="comment-input-row"><input id="comment-input" placeholder="Add a comment..."><button class="btn btn-primary" id="btn-add-comment">Add</button></div></div>
@@ -467,8 +496,8 @@ var DOMAIN_COLORS = { products:'#8b5cf6', business:'#58a6ff', career:'#2dd4bf', 
    .status-badge variants); the card badge needs them at runtime to colour all
    eight statuses, and SB-355 will need them again for the modal indicator.
    Kept identical to jarvis-pwa.html:506-507 so the two surfaces cannot drift. */
-var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950' };
-var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done' };
+var STAT_COLORS = { backlog:'#8b949e', todo:'#58a6ff', in_progress:'#8b5cf6', on_hold:'#a371f7', blocked:'#f85149', review:'#d29922', escalated:'#f0883e', done:'#3fb950', awaiting_jason:'#ff7b72' };
+var STAT_NAMES = { backlog:'Backlog', todo:'To Do', in_progress:'In Progress', on_hold:'On Hold', blocked:'Blocked', review:'Review', escalated:'Escalated', done:'Done', awaiting_jason:'Awaiting Jason' };
 var DOMAIN_LIST_FALLBACK = ['products','business','career','property','operations','family','hobbies','club'];
 var DOMAIN_LIST = DOMAIN_LIST_FALLBACK; // overridden dynamically from briefing data
 var COMPLIANCE_RE = /complian|licens|legal|copyright|privacy/i;
@@ -485,6 +514,39 @@ var showArchived=false;
 var editingItem=null, dragItem=null;
 var briefingData=null, jobLeads=[], attentionItems=[];
 
+/* SB-771 — Needs Jason (SB-769 design section 6).
+   isJason comes from rpc/is_jason_session and only decides what is OFFERED;
+   the database is the gate (decide_work_item refuses any other login). Jason
+   also approves in chat, recorded by JARVIS, so nothing here assumes the board
+   is the only path: every render reads the stored approval from the view. */
+var isJason=false, deciding=false;
+var PRE_ACTIVE=['backlog','todo','on_hold','awaiting_jason'];
+var DECIDE_NAMES={ approve:'Approve', reject:'Reject…', unapprove:'Un-approve' };
+var DECIDE_PAST={ approve:'approved', reject:'rejected', unapprove:'un-approved' };
+/* A card lives in the lane, and only there, while it needs Jason. awaiting_jason
+   is included even if needs_jason were false, so such a card is never invisible. */
+function inLane(item){ return item.needs_jason===true || item.status==='awaiting_jason'; }
+function laneSort(a,b){
+  var pa=a.status==='awaiting_jason'?0:1, pb=b.status==='awaiting_jason'?0:1;
+  if(pa!==pb) return pa-pb;
+  return (Number(b.waiting_days)||0)-(Number(a.waiting_days)||0);
+}
+function showLane(){ return isJason || allItems.some(inLane); }
+/* Which decisions to offer: L2+ only (a NULL level is not offered), never on a
+   finished or archived card, and un-approve only in the SB-275 pre-active
+   columns. Mirrors approval_decision_target so the menu does not offer what the
+   server would refuse outright. */
+function decisionsFor(item){
+  if(!isJason||!item||item.archived) return [];
+  if(!(item.authority_level>=2)) return [];
+  if(item.status==='done'||item.status==='cancelled') return [];
+  var out=[];
+  if(item.approval_status!=='approved') out.push('approve');
+  if(item.approval_status!=='rejected') out.push('reject');
+  if((item.approval_status==='approved'||item.approval_status==='rejected')&&PRE_ACTIVE.indexOf(item.status)!==-1) out.push('unapprove');
+  return out;
+}
+
 async function getHeaders() {
   var s = await sb.auth.getSession();
   var t = (s.data.session && s.data.session.access_token);
@@ -492,7 +554,7 @@ async function getHeaders() {
   return { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' };
 }
 function esc(s) { if(!s)return''; var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
-function toast(msg,type) { var t=document.createElement('div'); t.className='toast '+(type||'success'); t.textContent=msg; document.body.appendChild(t); setTimeout(function(){t.remove();},3000); }
+function toast(msg,type,ms) { var t=document.createElement('div'); t.className='toast '+(type||'success'); t.textContent=msg; document.body.appendChild(t); setTimeout(function(){t.remove();},ms||3000); }
 function fmtDur(ms){ if(ms==null)return'—'; if(ms<1000)return Math.round(ms)+'ms'; if(ms<60000)return(ms/1000).toFixed(1)+'s'; return(ms/60000).toFixed(1)+'m'; }
 function relTime(iso){ if(!iso)return'never'; var d=new Date(iso),diff=(Date.now()-d.getTime())/1000; if(diff<60)return'just now'; if(diff<3600)return Math.floor(diff/60)+'m ago'; if(diff<86400)return Math.floor(diff/3600)+'h ago'; if(diff<604800)return Math.floor(diff/86400)+'d ago'; return d.toLocaleDateString(); }
 function shortRole(name){ return(name||'').replace(/ (Developer|Engineer)$/,''); }
@@ -527,7 +589,7 @@ function showApp(){ document.getElementById('login-overlay').classList.add('hidd
 async function loadAll(){
   try {
     var h = await getHeaders();
-    var [pRes,lRes,iRes,aRes,bRes,jRes] = await Promise.all([
+    var [pRes,lRes,iRes,aRes,bRes,jRes,jsRes] = await Promise.all([
       fetch(SUPABASE_URL+'/rest/v1/projects?select=id,name,icon,domain,archived,meta&archived=eq.false&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/labels?select=id,name,color,project_id&order=name',{headers:h}),
       /* SB-314 — the archived filter is dropped, not inverted, when the chip is
@@ -536,7 +598,10 @@ async function loadAll(){
       fetch(SUPABASE_URL+'/rest/v1/kanban_board_view?select=*'+(showArchived?'':'&archived=eq.false')+'&order=sort_order',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/agents?select=id,name,icon,status,run_count,error_count,avg_duration_ms,last_run_at,max_concurrent_tasks,automation_enabled&order=name',{headers:h}),
       fetch(SUPABASE_URL+'/rest/v1/jarvis_briefings?select=*&order=briefing_date.desc&limit=1',{headers:h}),
-      fetch(SUPABASE_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score,match_quality,url&decision=eq.review&order=score.desc&limit=5',{headers:h})
+      fetch(SUPABASE_URL+'/rest/v1/job_applications?select=id,company,title,status,decision,score,match_quality,url&decision=eq.review&order=score.desc&limit=5',{headers:h}),
+      /* SB-771 — decides whether the decision options are offered. A failure
+         here just means "not Jason": the options stay hidden. */
+      fetch(SUPABASE_URL+'/rest/v1/rpc/is_jason_session',{method:'POST',headers:h,body:'{}'}).catch(function(){return null;})
     ]);
     var failures=[];
     if(!pRes.ok) failures.push('projects('+pRes.status+')');
@@ -550,6 +615,9 @@ async function loadAll(){
     projectDomain={}; allProjects.forEach(function(p){projectDomain[p.id]=p.domain||null;});
     var bData=bRes.ok?await bRes.json():[]; briefingData=bData[0]||null;
     jobLeads=jRes.ok?await jRes.json():[];
+    isJason=false;
+    if(jsRes&&jsRes.ok){ try{ isJason=(await jsRes.json())===true; }catch(e){} }
+    renderNeedsJasonBadge();
     attentionItems=allItems.filter(function(it){
       return it.acknowledged===false && ['todo','in_progress','blocked','review','escalated'].indexOf(it.status)!==-1 && ['critical','high'].indexOf(it.priority)!==-1;
     }).sort(function(a,b){ var po={critical:0,high:1}; return (po[a.priority]||2)-(po[b.priority]||2); }).slice(0,15);
@@ -700,6 +768,19 @@ function renderAttentionItems(){
     return true;
   });
   var html='';
+  /* SB-771 — what needs Jason comes first: up to five lane items, then the
+     unacknowledged high/critical list as before. A tap opens the lane. */
+  var nj=allItems.filter(function(it){ return it.needs_jason===true && (activeDom==='all'||itemDomain(it)===activeDom); }).sort(laneSort);
+  nj.slice(0,5).forEach(function(it){
+    html+='<div class="j-att-card nj-att" data-id="'+it.id+'"><div class="j-att-meta">';
+    html+='<span class="j-att-code">'+esc(it.ticket_code||'')+'</span>';
+    html+='<span class="j-att-badge nj'+(it.aging_breached?' aged':'')+'">Needs Jason</span>';
+    html+='<span class="j-att-project">'+esc(it.status==='awaiting_jason'?'Decision package':'Approval only · '+(STAT_NAMES[it.status]||it.status))+(it.waiting_days!=null?' · '+fmtWait(it.waiting_days)+' waiting':'')+'</span>';
+    html+='</div><div class="j-att-title">'+esc(it.title)+'</div>';
+    if(it.decision_needed) html+='<div class="j-att-desc">'+esc(it.decision_needed)+'</div>';
+    html+='</div>';
+  });
+  if(nj.length>5) html+='<div class="j-att-card nj-att"><div class="j-att-desc">+ '+(nj.length-5)+' more waiting on you</div></div>';
   filtered.forEach(function(it){
     html+='<div class="j-att-card"><div class="j-att-meta">';
     html+='<span class="j-att-code">'+esc(it.ticket_code||'')+'</span>';
@@ -712,7 +793,9 @@ function renderAttentionItems(){
     html+='</div>';
   });
   if(!html) html='<div style="color:var(--text-dim);font-size:13px;padding:8px 0">All clear — no unacknowledged items.</div>';
-  document.getElementById('j-attention-list').innerHTML=html;
+  var list=document.getElementById('j-attention-list');
+  list.innerHTML=html;
+  list.querySelectorAll('.nj-att').forEach(function(c){ c.addEventListener('click',openNeedsJason); });
 }
 
 function renderRecommendations(){
@@ -796,7 +879,8 @@ function matchesFlag(item){ if(flagFilter==='all')return true; if(flagFilter==='
 function filterItems(){
   return allItems.filter(function(item){
     if(currentProject!=='all'&&item.project_id!==currentProject)return false;
-    if(statusFilter!=='all'&&item.status!==statusFilter)return false;
+    if(statusFilter==='needs_jason'){ if(!inLane(item))return false; }
+    else if(statusFilter!=='all'&&item.status!==statusFilter)return false;
     if(priorityFilter!=='all'&&item.priority!==priorityFilter)return false;
     if(domainFilter!=='all'&&itemDomain(item)!==domainFilter)return false;
     if(labelFilter!=='all'&&!itemHasLabel(item,labelFilter))return false;
@@ -876,6 +960,120 @@ async function toggleAgentAutomation(btn){
   }catch(err){ toast('Automation update failed','error'); }
   btn.disabled=false;
 }
+/* SB-771 — one card's markup, shared by the status columns and the Needs
+   Jason lane. `st` is the column the card is drawn in (it drives the overdue
+   rule and the badge colour); lane cards pass their own status. */
+function buildCard(item, st, singleProject, lane){
+  var dom=itemDomain(item), stripe=dom?(DOMAIN_COLORS[dom]||'var(--text-dim)'):'var(--text-dim)';
+  var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
+  var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
+  var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
+  /* SB-352 — the agent chip no longer doubles as the unassigned marker.
+     An item with a human assignee and no agent is assigned, so it must not
+     read "Unassigned"; the fallback now fires only when BOTH are absent. */
+  var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'';
+  if(!item.assignee&&!item.agent_name) agentHtml='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
+  var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
+  /* SB-353 — a badge for every status, not just the three exception ones.
+     Colour comes from STAT_COLORS with the background at 15% opacity (hex
+     26), matching the PWA, so the two surfaces read identically. */
+  var stColor=STAT_COLORS[st]||'#8b949e';
+  var statusBadgeHtml='<span class="status-badge" style="color:'+stColor+';background:'+stColor+'26">'
+                     +esc(STAT_NAMES[st]||st)+'</span>';
+
+  /* SB-350 — slotted card assembly. Each indicator is a named slot that
+     evaluates to '' until its own ticket fills it, so SB-351..354 can land
+     independently without three of them rewriting the same template line.
+     Order within .card-meta is the render order; keep the highest-signal
+     items first, because this row wraps at a 300px column width. */
+  /* SB-351 — ticket code leads the meta row. Omitted entirely when the item
+     has none, so no placeholder or gap is left behind (TC-202-03). */
+  var slotCode=item.ticket_code?'<span class="card-code">'+esc(item.ticket_code)+'</span>':'';
+  /* SB-354 — type badge, non-task types only. A board of tasks would gain
+     nothing from every card announcing "TASK". */
+  var slotType='';
+  if(item.type&&item.type!=='task'){
+    var tCls={bug:'type-bug',user_story:'type-story',epic:'type-epic'};
+    var tName={bug:'Bug',user_story:'Story',epic:'Epic'};
+    slotType='<span class="type-badge '+(tCls[item.type]||'')+'">'+esc(tName[item.type]||item.type)+'</span>';
+  }
+
+  /* SB-354 — attention marker. High and critical only: an unacknowledged
+     low-priority item is not news, and badging everything would make the
+     badge mean nothing. */
+  var slotNew=(item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
+              ?'<span class="new-badge">NEW</span>':'';
+
+  /* SB-354 — subtask progress. Both counts already arrive via select=*. */
+  var slotSubtasks='';
+  if(item.child_count>0){
+    var allDone=item.completed_child_count>=item.child_count;
+    slotSubtasks='<span class="subtask-prog'+(allDone?' complete':'')+'">✓ '
+                +item.completed_child_count+'/'+item.child_count+'</span>';
+  }
+
+  /* SB-354 — why a card might be stuck, without opening it. */
+  var slotDeps=item.blocked_by_count>0
+               ?'<span class="dep-indicator">🔗 '+item.blocked_by_count+' dep'+(item.blocked_by_count>1?'s':'')+'</span>'
+               :'';
+  /* SB-352 — human assignee, primary to the agent chip that follows it.
+     Shows an initials avatar plus the first name only; the full name is on
+     the title attribute, which is also how the pill/chip stays addressable. */
+  var slotAssignee='';
+  if(item.assignee){
+    var ini=item.assignee.split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase();
+    slotAssignee='<span class="assignee-chip" title="'+esc(item.assignee)+'"><span class="av">'+esc(ini)+'</span>'
+                +esc(item.assignee.split(' ')[0])+'</span>';
+  }
+
+  /* SB-314 — archived marker. Only reachable when the Archived chip is on,
+     since the rows are otherwise excluded at fetch. Placed last in the meta
+     row: it describes the record's lifecycle, not the work. */
+  var slotArch=item.archived?'<span class="card-arch">Archived</span>':'';
+
+  /* SB-394 — why is this on hold? Both WIP gates redirect an over-limit
+     write to on_hold and return success, so a parked card was indistinguish-
+     able from one a person deliberately deferred. held_by_gate means the
+     database moved it; hold_reason means someone decided. */
+  var slotHold='';
+  if(item.status==='on_hold'){
+    if(item.held_by_gate)
+      slotHold='<span class="card-hold card-hold-gate" title="Parked automatically by '+esc(item.held_by_gate)+'">Auto-held</span>';
+    else if(item.hold_reason)
+      slotHold='<span class="card-hold" title="'+esc(item.hold_reason)+'">Held</span>';
+  }
+
+  /* SB-771 — lane cards say why they are here and for how long, and, in
+     Jason's session, carry a one-tap Approve chip. */
+  var slotLane='';
+  if(lane){
+    var pkg=item.status==='awaiting_jason', canApprove=decisionsFor(item).indexOf('approve')!==-1;
+    slotLane='<div class="nj-row"><span class="nj-kind'+(pkg?' pkg':'')+'">'
+            +esc(pkg?'Decision package':'Approval only · '+(STAT_NAMES[item.status]||item.status))+'</span>'
+            +(item.waiting_days!=null?'<span class="nj-wait'+(item.aging_breached?' aged':'')+'">'+esc(fmtWait(item.waiting_days))+' waiting</span>':'')
+            +(canApprove?'<button class="nj-approve" data-id="'+item.id+'" title="Approve '+esc(item.ticket_code||'')+'">✓ Approve</button>':'')
+            +'</div>'
+            +(item.decision_needed?'<div class="nj-decision">'+esc(item.decision_needed)+'</div>':'');
+  }
+
+  var meta=[slotCode,
+            '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',
+            slotType, slotNew,
+            singleProject?'':'<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>',
+            compHtml, statusBadgeHtml, slotHold, slotArch];
+  var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
+  var footRight=[slotAssignee, agentHtml];
+
+  var html='<div class="card'+(item.archived?' archived':'')+(lane?' nj-card':'')+'" draggable="'+(lane?'false':'true')+'" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
+  html+='<div class="card-meta">'+meta.join('')+'</div>';
+  html+=slotLane;
+  if(labels) html+='<div class="card-labels">'+labels+'</div>';
+  html+='<div class="card-title">'+esc(item.title)+'</div>';
+  html+='<div class="card-footer"><div class="card-footer-left">'+footLeft.join('')+'</div>'
+       +'<div class="card-footer-right">'+footRight.join('')+'</div></div></div>';
+  return html;
+}
+
 function renderBoard(){
   var statuses=['backlog','todo','in_progress','on_hold','blocked','review','escalated','done'];
   var scope=allItems.filter(function(i){return currentProject==='all'||i.project_id===currentProject;});
@@ -884,107 +1082,31 @@ function renderBoard(){
   document.getElementById('result-count').textContent=filtered.length+' of '+scope.length+' shown';
   var singleProject=currentProject!=='all';
   statuses.forEach(function(st){ var colEl=document.querySelector('.column[data-status="'+st+'"]'); if(colEl)colEl.style.display=(statusFilter==='all'||statusFilter===st)?'flex':'none'; });
+
+  /* SB-771 — the Needs Jason lane, first on the board. Shown whenever anything
+     needs Jason (or for Jason himself, so an empty lane reads as "all clear"),
+     and hidden when a single status is chosen. While it shows, its cards
+     appear here only; with a single status chosen they are back in place. */
+  var laneOn=showLane(), laneEl=document.getElementById('nj-lane');
+  var laneShown=laneOn&&(statusFilter==='all'||statusFilter==='needs_jason');
+  laneEl.style.display=laneShown?'flex':'none';
+  document.getElementById('chip-needs-jason').style.display=laneOn?'':'none';
+  var laneItems=filtered.filter(inLane).sort(laneSort);
+  document.getElementById('count-needs_jason').textContent=laneItems.length;
+  var lh='';
+  if(laneShown){
+    if(!laneItems.length) lh='<div class="col-empty nj-empty">Nothing waiting on Jason</div>';
+    laneItems.forEach(function(item){ lh+=buildCard(item, item.status, singleProject, true); });
+  }
+  document.getElementById('col-needs_jason').innerHTML=lh;
+
   statuses.forEach(function(st){
-    var col=document.getElementById('col-'+st), items=filtered.filter(function(i){return i.status===st;});
+    var col=document.getElementById('col-'+st), items=filtered.filter(function(i){return i.status===st&&!(laneShown&&inLane(i));});
     items.sort(function(a,b){return a.sort_order-b.sort_order;});
     document.getElementById('count-'+st).textContent=items.length;
     var html='';
     if(!items.length) html+='<div class="col-empty">—</div>';
-    items.forEach(function(item){
-      var dom=itemDomain(item), stripe=dom?(DOMAIN_COLORS[dom]||'var(--text-dim)'):'var(--text-dim)';
-      var labels=''; if(item.labels&&item.labels.length) item.labels.forEach(function(lb){labels+='<span class="card-label" style="background:'+esc(lb.color)+'">'+esc(lb.name)+'</span>';});
-      var dueHtml=''; if(item.due_date){var isOv=new Date(item.due_date)<new Date()&&st!=='done'&&st!=='on_hold'&&st!=='blocked'; dueHtml='<span class="card-due'+(isOv?' overdue':'')+'">📅 '+item.due_date+'</span>';}
-      var commentHtml=item.comment_count>0?'<span class="card-comments">💬 '+item.comment_count+'</span>':'';
-      /* SB-352 — the agent chip no longer doubles as the unassigned marker.
-         An item with a human assignee and no agent is assigned, so it must not
-         read "Unassigned"; the fallback now fires only when BOTH are absent. */
-      var agentHtml=item.agent_name?'<span class="agent-chip" title="'+esc(item.agent_name)+'"><span class="av">'+esc(item.agent_icon||'•')+'</span>'+esc(shortRole(item.agent_name))+'</span>':'';
-      if(!item.assignee&&!item.agent_name) agentHtml='<span class="agent-chip unassigned"><span class="av">∅</span>Unassigned</span>';
-      var compHtml=isCompliance(item)?'<span class="compliance-badge">⚖️ review</span>':'';
-      /* SB-353 — a badge for every status, not just the three exception ones.
-         Colour comes from STAT_COLORS with the background at 15% opacity (hex
-         26), matching the PWA, so the two surfaces read identically. */
-      var stColor=STAT_COLORS[st]||'#8b949e';
-      var statusBadgeHtml='<span class="status-badge" style="color:'+stColor+';background:'+stColor+'26">'
-                         +esc(STAT_NAMES[st]||st)+'</span>';
-
-      /* SB-350 — slotted card assembly. Each indicator is a named slot that
-         evaluates to '' until its own ticket fills it, so SB-351..354 can land
-         independently without three of them rewriting the same template line.
-         Order within .card-meta is the render order; keep the highest-signal
-         items first, because this row wraps at a 300px column width. */
-      /* SB-351 — ticket code leads the meta row. Omitted entirely when the item
-         has none, so no placeholder or gap is left behind (TC-202-03). */
-      var slotCode=item.ticket_code?'<span class="card-code">'+esc(item.ticket_code)+'</span>':'';
-      /* SB-354 — type badge, non-task types only. A board of tasks would gain
-         nothing from every card announcing "TASK". */
-      var slotType='';
-      if(item.type&&item.type!=='task'){
-        var tCls={bug:'type-bug',user_story:'type-story',epic:'type-epic'};
-        var tName={bug:'Bug',user_story:'Story',epic:'Epic'};
-        slotType='<span class="type-badge '+(tCls[item.type]||'')+'">'+esc(tName[item.type]||item.type)+'</span>';
-      }
-
-      /* SB-354 — attention marker. High and critical only: an unacknowledged
-         low-priority item is not news, and badging everything would make the
-         badge mean nothing. */
-      var slotNew=(item.acknowledged===false&&(item.priority==='critical'||item.priority==='high'))
-                  ?'<span class="new-badge">NEW</span>':'';
-
-      /* SB-354 — subtask progress. Both counts already arrive via select=*. */
-      var slotSubtasks='';
-      if(item.child_count>0){
-        var allDone=item.completed_child_count>=item.child_count;
-        slotSubtasks='<span class="subtask-prog'+(allDone?' complete':'')+'">✓ '
-                    +item.completed_child_count+'/'+item.child_count+'</span>';
-      }
-
-      /* SB-354 — why a card might be stuck, without opening it. */
-      var slotDeps=item.blocked_by_count>0
-                   ?'<span class="dep-indicator">🔗 '+item.blocked_by_count+' dep'+(item.blocked_by_count>1?'s':'')+'</span>'
-                   :'';
-      /* SB-352 — human assignee, primary to the agent chip that follows it.
-         Shows an initials avatar plus the first name only; the full name is on
-         the title attribute, which is also how the pill/chip stays addressable. */
-      var slotAssignee='';
-      if(item.assignee){
-        var ini=item.assignee.split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase();
-        slotAssignee='<span class="assignee-chip" title="'+esc(item.assignee)+'"><span class="av">'+esc(ini)+'</span>'
-                    +esc(item.assignee.split(' ')[0])+'</span>';
-      }
-
-      /* SB-314 — archived marker. Only reachable when the Archived chip is on,
-         since the rows are otherwise excluded at fetch. Placed last in the meta
-         row: it describes the record's lifecycle, not the work. */
-      var slotArch=item.archived?'<span class="card-arch">Archived</span>':'';
-
-      /* SB-394 — why is this on hold? Both WIP gates redirect an over-limit
-         write to on_hold and return success, so a parked card was indistinguish-
-         able from one a person deliberately deferred. held_by_gate means the
-         database moved it; hold_reason means someone decided. */
-      var slotHold='';
-      if(item.status==='on_hold'){
-        if(item.held_by_gate)
-          slotHold='<span class="card-hold card-hold-gate" title="Parked automatically by '+esc(item.held_by_gate)+'">Auto-held</span>';
-        else if(item.hold_reason)
-          slotHold='<span class="card-hold" title="'+esc(item.hold_reason)+'">Held</span>';
-      }
-
-      var meta=[slotCode,
-                '<span class="priority-dot priority-'+esc(item.priority)+'"></span>',
-                slotType, slotNew,
-                singleProject?'':'<span class="card-project-tag">'+esc((item.project_icon||'')+' '+(item.project_name||''))+'</span>',
-                compHtml, statusBadgeHtml, slotHold, slotArch];
-      var footLeft=[dueHtml, commentHtml, slotSubtasks, slotDeps];
-      var footRight=[slotAssignee, agentHtml];
-
-      html+='<div class="card'+(item.archived?' archived':'')+'" draggable="true" data-id="'+item.id+'"><span class="domain-stripe" style="background:'+stripe+'"></span>';
-      html+='<div class="card-meta">'+meta.join('')+'</div>';
-      if(labels) html+='<div class="card-labels">'+labels+'</div>';
-      html+='<div class="card-title">'+esc(item.title)+'</div>';
-      html+='<div class="card-footer"><div class="card-footer-left">'+footLeft.join('')+'</div>'
-           +'<div class="card-footer-right">'+footRight.join('')+'</div></div></div>';
-    });
+    items.forEach(function(item){ html+=buildCard(item, st, singleProject, false); });
     html+='<button class="add-card-btn" data-status="'+st+'">+ Add card</button>';
     col.innerHTML=html;
   });
@@ -1001,8 +1123,18 @@ function renderBoard(){
 function bindCardEvents(){
   document.querySelectorAll('.card').forEach(function(el){
     el.addEventListener('click',function(){openModal(el.dataset.id);});
+    /* SB-771 — lane cards are not dragged: approval changes go through
+       decide_work_item, and the lane is not a status to drop into. */
+    if(el.classList.contains('nj-card')) return;
     el.addEventListener('dragstart',function(e){dragItem=el.dataset.id;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
     el.addEventListener('dragend',function(){el.classList.remove('dragging');dragItem=null;document.querySelectorAll('.column').forEach(function(c){c.classList.remove('drag-over');});});
+  });
+  document.querySelectorAll('.nj-approve').forEach(function(btn){
+    btn.addEventListener('click',function(e){
+      e.stopPropagation();
+      var item=allItems.find(function(i){return i.id===btn.dataset.id;}); if(!item)return;
+      btn.disabled=true; runDecision(item,'approve',null);
+    });
   });
   document.querySelectorAll('.add-card-btn').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();openNewModal(btn.dataset.status);});});
 }
@@ -1073,6 +1205,119 @@ async function serverError(res, fallback){
   return new Error(msg);
 }
 
+/* ═══════════════════════════════════════════════════
+   SB-771 — Needs Jason: badge, decisions
+   ═══════════════════════════════════════════════════ */
+/* An approval refusal is shown exactly as the database wrote it, code and all
+   (SB-769 design 6): "SB-769: only Jason may approve L3/L4 ..." is the rule
+   Jason needs to read, so unlike serverError() nothing is trimmed. */
+async function dbError(res){
+  var raw='';
+  try{ raw=await res.text(); }catch(e){}
+  console.error('Request failed', res.status, raw);
+  var msg='';
+  try{ var b=JSON.parse(raw); msg=b.message||b.error_description||b.error||b.hint||''; }catch(e){}
+  return new Error(msg||('Decision failed (HTTP '+res.status+')'));
+}
+function fmtWait(d){ var n=Number(d); if(!isFinite(n)) return ''; return n<1?'<1d':Math.floor(n)+'d'; }
+
+/* Header badge: N = needs_jason rows (equal to the decision digest), amber when
+   any of them has breached its aging limit. Hidden at zero. */
+function renderNeedsJasonBadge(){
+  var nj=allItems.filter(function(i){return i.needs_jason===true;});
+  var b=document.getElementById('nj-badge');
+  document.getElementById('nj-count').textContent=nj.length;
+  b.classList.toggle('aged', nj.some(function(i){return i.aging_breached===true;}));
+  b.style.display=nj.length?'inline-flex':'none';
+}
+/* Badge tap: open the board filtered to the lane. */
+function openNeedsJason(){
+  document.querySelectorAll('.g-tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='board'); });
+  document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.toggle('active', p.id==='panel-board'); });
+  if(window.location.hash!=='#board') window.location.hash='board';
+  statusFilter='needs_jason';
+  document.querySelectorAll('#status-chips .chip').forEach(function(c){ c.classList.toggle('active', c.dataset.status==='needs_jason'); });
+  renderBoard();
+  document.getElementById('board').scrollLeft=0;
+}
+document.getElementById('nj-badge').addEventListener('click', openNeedsJason);
+
+/* One decision = one rpc/decide_work_item call. Never a PATCH: the RPC applies
+   the status rule (approve backlog → todo, reject → on_hold) and the audit
+   trigger writes the governance row. The board is re-read afterwards so the
+   card shows what the server stored, not what we asked for. */
+async function runDecision(item, decision, note){
+  if(deciding) return;
+  if(navigator.onLine===false){ toast('Offline — decisions locked','error'); resetDecisionSelect(); return; }
+  deciding=true;
+  try{
+    var h=await getHeaders();
+    var res=await fetch(SUPABASE_URL+'/rest/v1/rpc/decide_work_item',{method:'POST',headers:h,body:JSON.stringify({p_item_id:item.id,p_decision:decision,p_note:note})});
+    if(!res.ok) throw await dbError(res);
+    var r=await res.json()||{};
+    var reopen=!!(editingItem&&editingItem.id===item.id);
+    toast((r.ticket_code||item.ticket_code||'Item')+' '+(DECIDE_PAST[r.decision||decision]||decision)+' — now '+(STAT_NAMES[r.status]||r.status||'unchanged'),'success',4000);
+    await loadAll();
+    if(reopen&&document.getElementById('modal-overlay').classList.contains('active')) await openModal(item.id);
+  }catch(err){
+    toast(err.message,'error',8000);
+    resetDecisionSelect();
+    document.querySelectorAll('.nj-approve').forEach(function(b){ b.disabled=false; });
+  }
+  deciding=false;
+}
+
+/* The modal's status select carries the decisions as a group under the
+   statuses, plus Awaiting Jason as a move target — both only where they apply. */
+function renderDecisionOptions(item){
+  var sel=document.getElementById('m-status');
+  var old=document.getElementById('m-decide-group'); if(old) old.remove();
+  var aw=document.getElementById('m-opt-awaiting'); if(aw) aw.remove();
+  /* Awaiting Jason is never offered for L0/L1 (the database refuses it), but a
+     card already there must still find its own status in the list. */
+  if(item&&(item.authority_level>=2||item.status==='awaiting_jason')){
+    aw=document.createElement('option'); aw.id='m-opt-awaiting'; aw.value='awaiting_jason'; aw.textContent=STAT_NAMES.awaiting_jason;
+    sel.insertBefore(aw, sel.querySelector('option[value="done"]'));
+  }
+  var ds=decisionsFor(item);
+  if(ds.length){
+    var g=document.createElement('optgroup'); g.id='m-decide-group'; g.label='Decision (Jason)';
+    ds.forEach(function(d){ var o=document.createElement('option'); o.value='decide:'+d; o.textContent=DECIDE_NAMES[d]; g.appendChild(o); });
+    sel.appendChild(g);
+  }
+  hideRejectRow();
+}
+function resetDecisionSelect(){
+  hideRejectRow();
+  if(editingItem){ document.getElementById('m-status').value=editingItem.status; syncStatusDot(); }
+}
+function hideRejectRow(){
+  document.getElementById('m-reject-row').style.display='none';
+  var n=document.getElementById('m-reject-note'); n.value=''; n.classList.remove('err');
+}
+document.getElementById('m-status').addEventListener('change', function(){
+  var v=this.value;
+  if(v.indexOf('decide:')!==0){ hideRejectRow(); return; }
+  if(!editingItem) return;
+  var d=v.slice(7);
+  if(d==='reject'){
+    /* The note is asked for here, inline — never with a browser dialog. */
+    document.getElementById('m-reject-row').style.display='flex';
+    document.getElementById('m-reject-note').focus();
+    return;
+  }
+  runDecision(editingItem, d, null);
+});
+function submitReject(){
+  var n=document.getElementById('m-reject-note'), note=n.value.trim();
+  if(!note){ n.classList.add('err'); n.focus(); return; }
+  if(editingItem) runDecision(editingItem, 'reject', note);
+}
+document.getElementById('m-reject-go').addEventListener('click', submitReject);
+document.getElementById('m-reject-note').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); submitReject(); } });
+document.getElementById('m-reject-note').addEventListener('input', function(){ this.classList.remove('err'); });
+document.getElementById('m-reject-cancel').addEventListener('click', resetDecisionSelect);
+
 /* ── Modal ── */
 
 /* SB-355 — header identity and footer provenance, shared by both open paths.
@@ -1114,7 +1359,8 @@ function syncStatusDot(){
 function openNewModal(status){
   editingItem=null; document.getElementById('modal-title').textContent='New Work Item';
   document.getElementById('m-title').value=''; document.getElementById('m-desc').value='';
-  document.getElementById('m-status').value=status||'backlog'; document.getElementById('m-priority').value='medium';
+  renderDecisionOptions(null);
+  document.getElementById('m-status').value=(status&&status!=='needs_jason')?status:'backlog'; document.getElementById('m-priority').value='medium';
   document.getElementById('m-assignee').value=''; document.getElementById('m-due').value='';
   if(currentProject!=='all')document.getElementById('m-project').value=currentProject;
   document.getElementById('btn-delete-item').style.display='none'; document.getElementById('comments-section').style.display='none';
@@ -1125,6 +1371,7 @@ async function openModal(itemId){
   var item=allItems.find(function(i){return i.id===itemId;}); if(!item)return; editingItem=item;
   document.getElementById('modal-title').textContent='Edit Work Item';
   document.getElementById('m-title').value=item.title||''; document.getElementById('m-desc').value=item.description||'';
+  renderDecisionOptions(item);
   document.getElementById('m-project').value=item.project_id; document.getElementById('m-status').value=item.status;
   document.getElementById('m-priority').value=item.priority; document.getElementById('m-assignee').value=item.assignee||'';
   document.getElementById('m-due').value=item.due_date||''; document.getElementById('btn-delete-item').style.display='inline-flex';
@@ -1152,7 +1399,10 @@ document.getElementById('btn-add-comment').addEventListener('click',async functi
 });
 document.getElementById('btn-save-modal').addEventListener('click',async function(){
   var title=document.getElementById('m-title').value.trim(); if(!title){toast('Title is required','error');return;}
-  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-project').value,status:document.getElementById('m-status').value,priority:document.getElementById('m-priority').value,assignee:document.getElementById('m-assignee').value.trim()||null,due_date:document.getElementById('m-due').value||null,updated_at:new Date().toISOString()};
+  /* SB-771 — a decision is never saved as a status; Save keeps the stored one. */
+  var stVal=document.getElementById('m-status').value;
+  if(stVal.indexOf('decide:')===0) stVal=editingItem?editingItem.status:'backlog';
+  var data={title:title,description:document.getElementById('m-desc').value.trim()||null,project_id:document.getElementById('m-project').value,status:stVal,priority:document.getElementById('m-priority').value,assignee:document.getElementById('m-assignee').value.trim()||null,due_date:document.getElementById('m-due').value||null,updated_at:new Date().toISOString()};
   var selectedLabels=[]; document.querySelectorAll('#m-labels .label-chip.selected').forEach(function(c){selectedLabels.push(c.dataset.id);});
   try{var h=await getHeaders(); var itemId, storedStatus=null;
     if(editingItem){var res=await fetch(SUPABASE_URL+'/rest/v1/work_items?id=eq.'+editingItem.id,{method:'PATCH',headers:Object.assign({},h,{'Prefer':'return=representation'}),body:JSON.stringify(data)}); if(!res.ok)throw await serverError(res,'Update failed'); var urows=await res.json(); itemId=editingItem.id; storedStatus=(urows&&urows[0])?urows[0].status:null;}
