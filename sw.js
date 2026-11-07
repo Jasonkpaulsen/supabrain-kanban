@@ -11,7 +11,9 @@
 //         visitors fetch the new shell instead of the cached v12 one.
 // SB-803: uat-signoff-ui.js joins the app shell (Sign off button for test cases of a
 //         ticket in review, rpc/signoff_test_case_uat). v14 so installed apps take it.
-const CACHE_NAME = 'jarvis-pwa-v14';
+// SB-817: board search matches the ticket code on all three boards. v15 so installed
+//         apps fetch the new pages instead of the cached v14 ones.
+const CACHE_NAME = 'jarvis-pwa-v15';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
