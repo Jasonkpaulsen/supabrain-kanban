@@ -927,7 +927,7 @@ function filterItems(){
     if(labelFilter!=='all'&&!itemHasLabel(item,labelFilter))return false;
     if(agentFilter==='__unassigned'){if(item.agent_name)return false;} else if(agentFilter!=='all'){if(item.agent_name!==agentFilter)return false;}
     if(!matchesFlag(item))return false;
-    if(searchQuery){var q=searchQuery.toLowerCase(); var hay=[item.title,item.description,item.project_name,item.assignee,item.agent_name].concat((item.labels||[]).map(function(l){return l.name;})).join(' ').toLowerCase(); if(hay.indexOf(q)===-1)return false; }
+    if(searchQuery){var q=searchQuery.toLowerCase(); var hay=[item.ticket_code,item.title,item.description,item.project_name,item.assignee,item.agent_name].concat((item.labels||[]).map(function(l){return l.name;})).join(' ').toLowerCase(); if(hay.indexOf(q)===-1)return false; }
     return true;
   });
 }

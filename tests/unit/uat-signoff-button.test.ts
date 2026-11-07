@@ -117,6 +117,9 @@ for (const file of BOARDS) {
 test("sw.js precaches uat-signoff-ui.js and moved past jarvis-pwa-v13", () => {
   const src = read("sw.js");
   assert.match(src, /'\.\/uat-signoff-ui\.js'/);
-  assert.match(src, /const CACHE_NAME = 'jarvis-pwa-v14';/);
+  // SB-817: "v14 or later" so a later cache bump does not break this guard.
+  const m = src.match(/const CACHE_NAME = 'jarvis-pwa-v(\d+)';/);
+  assert.ok(m, "CACHE_NAME is jarvis-pwa-v<N>");
+  assert.ok(Number(m![1]) >= 14, `CACHE_NAME is v${m![1]}, expected v14 or later`);
   assert.doesNotMatch(src, /'jarvis-pwa-v1[123]'/);
 });
