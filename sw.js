@@ -9,7 +9,9 @@
 //         cancel-ui.js join the app shell, and the pages gain the cancelled state,
 //         summary-card filters and the automation_status toggle. v13 so returning
 //         visitors fetch the new shell instead of the cached v12 one.
-const CACHE_NAME = 'jarvis-pwa-v13';
+// SB-803: uat-signoff-ui.js joins the app shell (Sign off button for test cases of a
+//         ticket in review, rpc/signoff_test_case_uat). v14 so installed apps take it.
+const CACHE_NAME = 'jarvis-pwa-v14';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
@@ -17,6 +19,7 @@ const APP_SHELL = [
   './jarvis-pwa.html',
   './config.js',
   './cancel-ui.js',
+  './uat-signoff-ui.js',
   './manifest.json',
   './kanban-icon.svg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'

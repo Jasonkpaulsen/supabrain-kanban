@@ -264,3 +264,13 @@
     isOpen: function () { return document.getElementById('cancel-dlg-bg').classList.contains('open'); }
   };
 })();
+
+/* SB-803: the three boards load the acceptance sign-off module (Sign off on test
+   cases of a ticket in review) through this file, which only they load, so their
+   HTML is unchanged. uat-signoff-ui.js wires itself to the edit modal. */
+(function () {
+  if (document.querySelector('script[src$="uat-signoff-ui.js"]')) return;
+  var s = document.createElement('script');
+  s.src = 'uat-signoff-ui.js';
+  (document.head || document.documentElement).appendChild(s);
+})();
