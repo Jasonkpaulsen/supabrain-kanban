@@ -893,7 +893,7 @@ function filterItems(){
     if(domF!=='all'&&iDom(it)!==domF)return false;
     if(labelF!=='all'&&!(it.labels||[]).some(function(l){return l.name===labelF;}))return false;
     if(agentF==='__un'){if(it.agent_name)return false;}else if(agentF!=='all'){if(it.agent_name!==agentF)return false;}
-    if(search){var q=search.toLowerCase(),hay=[it.title,it.description,it.project_name,it.agent_name].join(' ').toLowerCase();if(hay.indexOf(q)===-1)return false;}
+    if(search){var q=search.toLowerCase(),hay=[it.ticket_code,it.title,it.description,it.project_name,it.agent_name].join(' ').toLowerCase();if(hay.indexOf(q)===-1)return false;}
     return true;
   });
 }
