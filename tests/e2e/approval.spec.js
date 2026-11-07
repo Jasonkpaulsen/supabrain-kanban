@@ -322,8 +322,9 @@ for (const file of ['jarvis-pwa.html', 'index.html']) {
 // SB-775: bumped to v13 when PR #10's front end (config.js and cancel-ui.js in the
 // app shell) landed on top of SB-771. The point of V11 is unchanged: the cache name
 // moved past every name an installed app may already hold.
+// SB-803: bumped to v14 when uat-signoff-ui.js joined the app shell.
 test('@sb771 TC-SB771-V11 sw.js cache is past jarvis-pwa-v12 so the iPhone app picks up the new board', async () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'sw.js'), 'utf8');
-  expect(src).toMatch(/const CACHE_NAME = 'jarvis-pwa-v13';/);
-  expect(src).not.toMatch(/'jarvis-pwa-v1[12]'/);
+  expect(src).toMatch(/const CACHE_NAME = 'jarvis-pwa-v14';/);
+  expect(src).not.toMatch(/'jarvis-pwa-v1[123]'/);
 });
