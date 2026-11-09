@@ -13,7 +13,9 @@
 //         ticket in review, rpc/signoff_test_case_uat). v14 so installed apps take it.
 // SB-817: board search matches the ticket code on all three boards. v15 so installed
 //         apps fetch the new pages instead of the cached v14 ones.
-const CACHE_NAME = 'jarvis-pwa-v15';
+// Password recovery: password-reset.js joins the app shell ("Forgot password?" on the
+//         sign-in forms, reset-password.html landing page). v16 so installed apps take it.
+const CACHE_NAME = 'jarvis-pwa-v16';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
@@ -22,6 +24,7 @@ const APP_SHELL = [
   './config.js',
   './cancel-ui.js',
   './uat-signoff-ui.js',
+  './password-reset.js',
   './manifest.json',
   './kanban-icon.svg',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'

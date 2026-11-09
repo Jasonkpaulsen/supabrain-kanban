@@ -7,6 +7,7 @@
 <title>JARVIS</title>
 <script src="config.js"></script>
 <script src="cancel-ui.js"></script>
+<script src="password-reset.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -593,6 +594,8 @@ document.getElementById('login-form').addEventListener('submit', async function(
   showApp(); loadAll();
 });
 document.getElementById('btn-logout').addEventListener('click', async function(){ await sb.auth.signOut(); document.getElementById('login-overlay').classList.remove('hidden'); document.getElementById('app').style.display='none'; });
+/* Password recovery: "Forgot password?" under the sign-in form (password-reset.js). */
+PasswordReset.wireForgot({client:sb,email:'login-email',after:'login-error'});
 async function checkSession(){ var s=await sb.auth.getSession(); if(s.data.session){showApp(); loadAll();} }
 function showApp(){ document.getElementById('login-overlay').classList.add('hidden'); document.getElementById('app').style.display='block'; }
 

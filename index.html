@@ -11,6 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <script src="config.js"></script>
 <script src="cancel-ui.js"></script>
+<script src="password-reset.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
@@ -591,6 +592,8 @@ document.getElementById('login-form').addEventListener('submit',async function(e
   if(r.error){err.textContent=r.error.message;err.style.display='block';btn.disabled=false;btn.textContent='Sign In';return;}
   boot();
 });
+/* Password recovery: "Forgot password?" under the sign-in form (password-reset.js). */
+PasswordReset.wireForgot({client:sb,email:'l-email',after:'l-err'});
 /* Logout handler moved to SB-186 section below (includes cache purge) */
 async function checkAuth(){var s=await sb.auth.getSession();if(s.data.session)boot();}
 function boot(){document.getElementById('login-overlay').classList.add('hidden');document.getElementById('app').style.display='flex';loadAll();}
