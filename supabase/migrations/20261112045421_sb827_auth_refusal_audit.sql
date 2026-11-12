@@ -107,5 +107,5 @@ COMMENT ON FUNCTION public.external_connection_record_auth_refusal(text, uuid) I
   'stores no token; client id only from the verified claim.';
 
 -- SB-827 D2 (3/3): grants.
-REVOKE ALL ON FUNCTION public.external_connection_record_auth_refusal(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.external_connection_record_auth_refusal(text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.external_connection_record_auth_refusal(text, uuid) TO anon, authenticated, service_role;
