@@ -14,6 +14,10 @@
 
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 import { guardedCall, UNKNOWN_TOOL, type Classified } from "./controls.ts";
+import {
+  LIMITS, textLen, validateFields, checkLabelIds, RECORD_FIELD_SPECS, WORK_ITEM_SPECS, capRows,
+  ToolError, classifyJoseError, authRefusalRequest, RefusalAuditGuard, type AuthReason,
+} from "./validate.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 // SB-182: the API key that identifies this app to PostgREST. It is NOT what
@@ -44,7 +48,7 @@ const ISSUER = `${SUPABASE_URL}/auth/v1`;
 const JWKS = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`));
 const REST = `${SUPABASE_URL}/rest/v1`;
 const SERVER_NAME = "family-codex-mcp";
-const SERVER_VERSION = "1.1.0";
+const SERVER_VERSION = "1.2.0";
 const PROTOCOL_VERSION = "2025-06-18";
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
@@ -138,10 +142,7 @@ const WORK_ITEM_CREATE = ["title","description","priority","type","due_date"];
 const WORK_ITEM_UPDATE = ["title","description","status","priority","due_date"];
 
 // ------------------------------------------------------------------ helpers
-class ToolError extends Error {
-  code: string;
-  constructor(code: string, message: string) { super(message); this.code = code; }
-}
+// ToolError lives in validate.ts (v6) so the pure validators can throw it under Node.
 
 function strip(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -173,7 +174,7 @@ function uuid(v: unknown, field: string): string {
 }
 function str(v: unknown, field: string, max = 20_000): string {
   if (typeof v !== "string" || v.length === 0) throw new ToolError("bad_request", `${field} must be a non-empty string.`);
-  if (v.length > max) throw new ToolError("bad_request", `${field} exceeds ${max} characters.`);
+  if (textLen(v, max) > max) throw new ToolError("bad_request", `${field} exceeds ${max} characters.`);
   return v;
 }
 
@@ -226,8 +227,10 @@ async function assertMember(caller: Caller, projectId: string) {
 // the whole predicate — OAuth connection, auth.uid(), operator grant, membership,
 // agent_projects, profile status, hierarchy, project scope — per call. This
 // function cannot widen any of that; a refusal arrives here as a PostgREST error.
-async function rpc(caller: Caller, fn: string, body: Record<string, unknown>) {
-  return await rest(caller, `/rpc/${fn}`, { method: "POST", body: JSON.stringify(body) });
+// SB-825: the optional query (e.g. "?limit=101") only bounds the transfer; callers
+// still cap the rows in code.
+async function rpc(caller: Caller, fn: string, body: Record<string, unknown>, query = "") {
+  return await rest(caller, `/rpc/${fn}${query}`, { method: "POST", body: JSON.stringify(body) });
 }
 
 // ------------------------------------------------------------------- tools
@@ -261,7 +264,7 @@ const TOOLS = [
     description: "Create a work item in one of your projects. Requires confirm: true.",
     inputSchema: { type: "object", required: ["project_id","title","confirm"], additionalProperties: false, properties: {
       project_id: { type: "string" }, title: { type: "string", maxLength: 500 },
-      description: { type: "string" }, priority: { type: "string", enum: ["critical","high","medium","low"] },
+      description: { type: "string", maxLength: 20000 }, priority: { type: "string", enum: ["critical","high","medium","low"] },
       type: { type: "string", enum: ["task","bug","user_story","chore"] },
       due_date: { type: "string", description: "YYYY-MM-DD" },
       confirm: { type: "boolean", description: "Must be true. The operator confirms this write." } } } },
@@ -271,7 +274,7 @@ const TOOLS = [
     inputSchema: { type: "object", required: ["work_item_id","patch","confirm"], additionalProperties: false, properties: {
       work_item_id: { type: "string" },
       patch: { type: "object", additionalProperties: false, properties: {
-        title: { type: "string", maxLength: 500 }, description: { type: "string" },
+        title: { type: "string", maxLength: 500 }, description: { type: "string", maxLength: 20000 },
         status: { type: "string", enum: ["backlog","todo","in_progress","review","done","blocked","on_hold"] },
         priority: { type: "string", enum: ["critical","high","medium","low"] },
         due_date: { type: "string" } } },
@@ -315,14 +318,14 @@ const TOOLS = [
       record_type: { type: "string", enum: RECORD_TYPES }, project_id: { type: "string" },
       payload: { type: "object" }, confirm: { type: "boolean" },
       confirm_regimen_change: { type: "boolean", description: "Medication only. True asserts the operator has confirmed this specific change." },
-      instruction_source: { type: "string", description: "Medication only. Who instructed this change, e.g. 'Dr Chen, visit 2026-09-02' or 'parent decision'. Recorded, not interpreted." } } } },
+      instruction_source: { type: "string", maxLength: 500, description: "Medication only. Who instructed this change, e.g. 'Dr Chen, visit 2026-09-02' or 'parent decision'. Recorded, not interpreted." } } } },
 
   { name: "update_family_record", title: "Update a family record", annotations: WRITE,
     description: "Patch a family or care record. Cannot move a record between projects or change its owner. Requires confirm: true. Medication regimen fields additionally require confirm_regimen_change and instruction_source.",
     inputSchema: { type: "object", required: ["record_type","record_id","patch","confirm"], additionalProperties: false, properties: {
       record_type: { type: "string", enum: RECORD_TYPES }, record_id: { type: "string" },
       patch: { type: "object" }, confirm: { type: "boolean" },
-      confirm_regimen_change: { type: "boolean" }, instruction_source: { type: "string" } } } },
+      confirm_regimen_change: { type: "boolean" }, instruction_source: { type: "string", maxLength: 500 } } } },
 
   { name: "list_care_audit_events", title: "List care audit events", annotations: READ_ONLY,
     description: "Read-only audit trail of changes to care records in one of your projects.",
@@ -345,7 +348,7 @@ const TOOLS = [
     description: "Adopt an agent's role for this conversation. Returns the role instructions, guardrails, allowed tools and delegation targets, and opens a run for the record. It grants no additional data access: everything still runs under your own permissions.",
     inputSchema: { type: "object", required: ["agent_id", "project_id", "purpose", "confirm"], additionalProperties: false, properties: {
       agent_id: { type: "string" }, project_id: { type: "string" },
-      purpose: { type: "string", description: "Why you are adopting this role. Recorded on the run." },
+      purpose: { type: "string", maxLength: 2000, description: "Why you are adopting this role. Recorded on the run." },
       work_item_id: { type: "string", description: "Optional work item this session is about." },
       confirm: { type: "boolean", const: true } } } },
 
@@ -353,12 +356,12 @@ const TOOLS = [
     description: "From an open session, hand off to a permitted specialist. Only targets in the parent role's delegation list are accepted.",
     inputSchema: { type: "object", required: ["parent_run_id", "child_agent_id", "purpose", "confirm"], additionalProperties: false, properties: {
       parent_run_id: { type: "string" }, child_agent_id: { type: "string" },
-      purpose: { type: "string" }, confirm: { type: "boolean", const: true } } } },
+      purpose: { type: "string", maxLength: 2000 }, confirm: { type: "boolean", const: true } } } },
 
   { name: "complete_family_agent_session", title: "Close a family agent session", annotations: WRITE,
     description: "Close one of your open sessions and record what came of it.",
     inputSchema: { type: "object", required: ["run_id", "result_summary", "status", "confirm"], additionalProperties: false, properties: {
-      run_id: { type: "string" }, result_summary: { type: "string" },
+      run_id: { type: "string" }, result_summary: { type: "string", maxLength: 8000 },
       status: { type: "string", enum: ["completed", "failed", "cancelled"] },
       confirm: { type: "boolean", const: true } } } },
 
@@ -393,8 +396,10 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
 
   switch (name) {
     case "list_family_projects": {
-      const rows = await rest(caller, `/projects?select=id,name,project_key,parent_project_id&order=name`);
-      return dataEnvelope("projects", (rows as Record<string, unknown>[]).map(strip));
+      // SB-825: hard cap of 100 with a truncated flag (the schema takes no limit/offset).
+      const fetched = await rest(caller, `/projects?select=id,name,project_key,parent_project_id&order=name&limit=${LIMITS.LIST_CAP + 1}`);
+      const { rows, truncated } = capRows(fetched as Record<string, unknown>[] | null, LIMITS.LIST_CAP);
+      return dataEnvelope("projects", rows.map(strip), { limit: LIMITS.LIST_CAP, truncated });
     }
     case "list_work_items": {
       const p = uuid(a.project_id, "project_id"); await assertMember(caller, p);
@@ -413,6 +418,10 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
     }
     case "create_work_item": {
       needConfirm();
+      // SB-825: caps and enums before any network call.
+      const given: Record<string, unknown> = {};
+      for (const k of ["title", "description", "priority", "type", "due_date"]) if (a[k] !== undefined) given[k] = a[k];
+      validateFields("work_items", given, WORK_ITEM_SPECS);
       const p = uuid(a.project_id, "project_id"); await assertMember(caller, p);
       const body = { ...pick({ title: str(a.title, "title", 500), description: a.description, priority: a.priority, type: a.type, due_date: a.due_date }, WORK_ITEM_CREATE, "work_items"),
         project_id: p, user_id: caller.sub, status: "backlog", type: (a.type as string) ?? "task", priority: (a.priority as string) ?? "medium" };
@@ -424,6 +433,7 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
       const id = uuid(a.work_item_id, "work_item_id");
       const patch = pick(a.patch as Record<string, unknown>, WORK_ITEM_UPDATE, "work_items");
       if (Object.keys(patch).length === 0) throw new ToolError("bad_request", "patch is empty.");
+      validateFields("work_items", patch, WORK_ITEM_SPECS);   // SB-825 (N6a)
       const rows = await rest(caller, `/work_items?id=eq.${id}&select=${WORK_ITEM_READ.join(",")}`, { method: "PATCH", body: JSON.stringify(patch), headers: { Prefer: "return=representation" } });
       if (!rows || (rows as unknown[]).length === 0) throw new ToolError("not_found", "No such work item, or you cannot edit it.");
       return dataEnvelope("work_item_updated", (rows as Record<string, unknown>[]).map(strip));
@@ -450,7 +460,7 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
     case "set_work_item_labels": {
       needConfirm();
       const id = uuid(a.work_item_id, "work_item_id");
-      const ids = (a.label_ids as unknown[]).map((v, i) => uuid(v, `label_ids[${i}]`));
+      const ids = checkLabelIds(a.label_ids).map((v, i) => uuid(v, `label_ids[${i}]`));
       const rows = await rest(caller, `/work_item_labels?select=work_item_id,label_id`, { method: "POST", headers: { Prefer: "return=representation,resolution=ignore-duplicates" },
         body: JSON.stringify(ids.map((l) => ({ work_item_id: id, label_id: l }))) });
       return dataEnvelope("labels_attached", (rows as Record<string, unknown>[]) ?? [], { note: "Attach only. Removing a label is not available through this connection." });
@@ -480,6 +490,8 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
       const input = (isCreate ? a.payload : a.patch) as Record<string, unknown>;
       const fields = pick(input, isCreate ? def.create : def.update, String(a.record_type));
       if (Object.keys(fields).length === 0) throw new ToolError("bad_request", "Nothing to write.");
+      // SB-825: before the regimen guard and before any network call.
+      validateFields(String(a.record_type), fields, RECORD_FIELD_SPECS[String(a.record_type)]);
       if (isCreate) for (const r of def.required) if (fields[r] === undefined) throw new ToolError("bad_request", `${r} is required for ${a.record_type}.`);
 
       // Medication regimen guard (ADR-FAM-002 medical safeguards).
@@ -487,6 +499,9 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
         if (a.confirm_regimen_change !== true || typeof a.instruction_source !== "string" || a.instruction_source.trim().length === 0) {
           throw new ToolError("regimen_confirmation_required",
             "Medication name, dose, schedule, prescriber or dates may only be written to record an instruction a parent or prescriber has already given. Re-issue with confirm_regimen_change: true and instruction_source naming who decided it. This tool records decisions; it does not make or suggest them.");
+        }
+        if (textLen(a.instruction_source as string, LIMITS.INSTRUCTION_SOURCE) > LIMITS.INSTRUCTION_SOURCE) {
+          throw new ToolError("bad_request", `instruction_source exceeds ${LIMITS.INSTRUCTION_SOURCE} characters.`);
         }
       }
 
@@ -512,7 +527,11 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
     case "list_family_agents": {
       const pid = a.project_id === undefined ? null : uuid(a.project_id, "project_id");
       if (pid) await assertMember(caller, pid);
-      const rows = (await rpc(caller, "list_family_agents", { p_project_id: pid })) as Record<string, unknown>[];
+      // SB-825: the pair fetch is bounded, then the grouped list is capped at 100.
+      const fetched = (await rpc(caller, "list_family_agents", { p_project_id: pid }, `?limit=${LIMITS.AGENT_PAIRS_FETCH}`)) as Record<string, unknown>[] | null;
+      const pairs = capRows(fetched, LIMITS.AGENT_PAIRS_FETCH);
+      const pairsHitCap = (Array.isArray(fetched) ? fetched.length : 0) >= LIMITS.AGENT_PAIRS_FETCH;
+      const rows = pairs.rows;
       // The RPC returns one row per (agent, project) pair. Group by agent so the
       // operator sees eleven agents rather than twenty-two, and nest the projects.
       const byAgent = new Map<string, Record<string, unknown>>();
@@ -529,7 +548,8 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
         });
         byAgent.set(key, entry);
       }
-      return dataEnvelope("family_agents", [...byAgent.values()]);
+      const agents = capRows([...byAgent.values()], LIMITS.LIST_CAP);
+      return dataEnvelope("family_agents", agents.rows, { limit: LIMITS.LIST_CAP, truncated: agents.truncated || pairsHitCap });
     }
     case "get_family_agent_profile": {
       const ag = uuid(a.agent_id, "agent_id");
@@ -576,8 +596,10 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
     case "list_my_family_agent_sessions": {
       const pid = a.project_id === undefined ? null : uuid(a.project_id, "project_id");
       if (pid) await assertMember(caller, pid);
-      const rows = await rpc(caller, "list_my_family_agent_sessions", { p_project_id: pid });
-      return dataEnvelope("family_agent_sessions", (rows as Record<string, unknown>[]).map(strip));
+      // SB-825: the RPC orders started_at desc, so the newest 100 are kept.
+      const fetched = await rpc(caller, "list_my_family_agent_sessions", { p_project_id: pid }, `?limit=${LIMITS.LIST_CAP + 1}`);
+      const { rows, truncated } = capRows(fetched as Record<string, unknown>[] | null, LIMITS.LIST_CAP);
+      return dataEnvelope("family_agent_sessions", rows.map(strip), { limit: LIMITS.LIST_CAP, truncated });
     }
     case "assign_family_agent_to_work_item": {
       needConfirm();
@@ -593,32 +615,78 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
 }
 
 // -------------------------------------------------------------------- auth
-async function authenticate(req: Request): Promise<Caller> {
+// SB-827: a refusal is returned, not thrown, so the server can audit it with a
+// reason code. Every message and status is byte-identical to v5 (Codex discovery
+// depends on the 401 + WWW-Authenticate). verifiedToken is set only once jwtVerify
+// has succeeded AND the token has a subject; it is used for nothing but the
+// Authorization header of the refusal-audit RPC, and is never logged.
+type AuthResult =
+  | { ok: true; caller: Caller }
+  | { ok: false; status: 401 | 403; message: string; reason: AuthReason; verifiedToken: string | null };
+
+function refuse(status: 401 | 403, message: string, reason: AuthReason, verifiedToken: string | null = null): AuthResult {
+  return { ok: false, status, message, reason, verifiedToken };
+}
+
+async function authenticate(req: Request): Promise<AuthResult> {
   const hdr = req.headers.get("authorization") ?? "";
   const m = hdr.match(/^Bearer\s+(.+)$/i);
-  if (!m) throw new ToolError("unauthorized", "Missing bearer token.");
+  if (!m) return refuse(401, "Missing bearer token.", "token_missing");
   const token = m[1];
 
   let payload: Record<string, unknown>;
   try {
     const v = await jwtVerify(token, JWKS, { issuer: ISSUER, audience: "authenticated" });
     payload = v.payload as Record<string, unknown>;
-  } catch {
-    throw new ToolError("unauthorized", "Token failed verification.");
+  } catch (e) {
+    return refuse(401, "Token failed verification.", classifyJoseError(e));
   }
   const sub = typeof payload.sub === "string" ? payload.sub : "";
   const clientId = typeof payload.client_id === "string" ? payload.client_id : "";
-  if (!sub) throw new ToolError("unauthorized", "Token carries no subject.");
-  if (!clientId) throw new ToolError("unauthorized", "Token carries no client_id. This endpoint serves the registered connector only, not ordinary dashboard sessions.");
+  if (!sub) return refuse(401, "Token carries no subject.", "token_no_subject");
+  if (!clientId) return refuse(401, "Token carries no client_id. This endpoint serves the registered connector only, not ordinary dashboard sessions.", "client_id_missing", token);
 
   const caller: Caller = { sub, clientId, token, connectionId: "" };
-  const rows = await rest(caller, `/external_connections?principal_user_id=eq.${sub}&oauth_client_id=eq.${encodeURIComponent(clientId)}&status=eq.active&select=id,expires_at&limit=1`);
-  if (!Array.isArray(rows) || rows.length === 0) throw new ToolError("forbidden", "No active connection for this principal and client.");
+  let rows: unknown;
+  try {
+    rows = await rest(caller, `/external_connections?principal_user_id=eq.${sub}&oauth_client_id=eq.${encodeURIComponent(clientId)}&status=eq.active&select=id,expires_at&limit=1`);
+  } catch (e) {
+    // Lookup failed (timeout/upstream/rejected/forbidden): same status and message as v5.
+    const err = e as ToolError;
+    return refuse(err.code === "forbidden" ? 403 : 401, err.message, "identity_check_error", token);
+  }
+  // The edge cannot tell not-found / other principal / proposed / disabled / revoked
+  // apart; the DB re-derives the exact reason from the verified claims.
+  if (!Array.isArray(rows) || rows.length === 0) return refuse(403, "No active connection for this principal and client.", "connection_not_found", token);
   const conn = rows[0] as Record<string, unknown>;
   const exp = conn.expires_at;
-  if (typeof exp === "string" && new Date(exp) <= new Date()) throw new ToolError("forbidden", "This connection has expired.");
+  if (typeof exp === "string" && new Date(exp) <= new Date()) return refuse(403, "This connection has expired.", "connection_expired", token);
   caller.connectionId = String(conn.id);
-  return caller;
+  return { ok: true, caller };
+}
+
+// SB-827: one throttled audit row per identity refusal. Anonymous unless the token
+// was verified. Never changes the reply: every failure is swallowed.
+const REFUSAL_AUDIT_TIMEOUT_MS = 2_000;
+const refusalGuard = new RefusalAuditGuard();
+function queueAuthRefusalAudit(reason: AuthReason, verifiedToken: string | null, traceId: string): Promise<void> {
+  if (!refusalGuard.allow()) return Promise.resolve();
+  const r = authRefusalRequest(reason, verifiedToken, traceId, API_KEY);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), REFUSAL_AUDIT_TIMEOUT_MS);
+  return fetch(`${REST}/rpc/external_connection_record_auth_refusal`, {
+    method: "POST", headers: r.headers, body: JSON.stringify(r.body), signal: ctl.signal,
+  })
+    .then(async (res) => { await res.body?.cancel(); })
+    .catch(() => {})
+    .finally(() => clearTimeout(timer));
+}
+
+// Hand a background promise to the edge runtime when it offers waitUntil; otherwise await it.
+async function settle(p: Promise<void>) {
+  const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (er && typeof er.waitUntil === "function") { er.waitUntil(p); return; }
+  await p;
 }
 
 // ------------------------------------------------------------------ server
@@ -662,8 +730,23 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405, { Allow: "POST" });
 
+  // SB-825: bound the whole request before parsing it.
+  const declared = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > LIMITS.MAX_BODY_BYTES) {
+    console.log(JSON.stringify({ evt: "body_too_large" }));
+    return rpcErr(null, -32600, "Request too large.", 413);
+  }
   let body: Record<string, unknown>;
-  try { body = await req.json(); } catch { return rpcErr(null, -32700, "Parse error."); }
+  try {
+    const raw = await req.text();
+    if (raw.length > LIMITS.MAX_BODY_BYTES) {
+      console.log(JSON.stringify({ evt: "body_too_large" }));
+      return rpcErr(null, -32600, "Request too large.", 413);
+    }
+    body = JSON.parse(raw);
+  } catch { return rpcErr(null, -32700, "Parse error."); }
+  // One trace id per request: returned on identity refusals and used by tools/call.
+  const traceId = crypto.randomUUID();
   const id = body.id ?? null;
   const method = String(body.method ?? "");
 
@@ -676,16 +759,24 @@ Deno.serve(async (req) => {
   if (method.startsWith("notifications/")) return new Response(null, { status: 202 });
   if (method === "ping") return rpcOk(id, {});
 
-  let caller: Caller;
+  let auth: AuthResult;
   try {
-    caller = await authenticate(req);
+    auth = await authenticate(req);
   } catch (e) {
+    // Unexpected fault inside authentication: v5 answered 401 with the error's message.
     const err = e as ToolError;
-    const status = err.code === "forbidden" ? 403 : 401;
-    return json({ jsonrpc: "2.0", id, error: { code: -32001, message: err.message } }, status, {
+    auth = refuse(err?.code === "forbidden" ? 403 : 401, String(err?.message ?? ""), "identity_check_error");
+  }
+  if (!auth.ok) {
+    // SB-827: audit the refusal (throttled, never changes the reply), log identifiers only,
+    // and answer exactly as v5 plus error.data.trace_id.
+    await settle(queueAuthRefusalAudit(auth.reason, auth.verifiedToken, traceId));
+    console.log(JSON.stringify({ evt: "auth_refused", reason: auth.reason, trace_id: traceId }));
+    return json({ jsonrpc: "2.0", id, error: { code: -32001, message: auth.message, data: { trace_id: traceId } } }, auth.status, {
       "WWW-Authenticate": `Bearer realm="${SERVER_NAME}", resource_metadata="${base}/.well-known/oauth-protected-resource"`,
     });
   }
+  const caller: Caller = auth.caller;
 
   try {
     if (method === "tools/list") return rpcOk(id, { tools: TOOLS });
@@ -695,7 +786,6 @@ Deno.serve(async (req) => {
       const args = (params.arguments ?? {}) as Record<string, unknown>;
       const def = TOOLS.find((t) => t.name === requested);
       const started = Date.now();
-      const traceId = crypto.randomUUID();
       // SB-600: precheck (status, expiry, rate limit) before, one audit row after.
       const g = await guardedCall({
         rpc: (fn, b) => rpc(caller, fn, b),
@@ -710,7 +800,15 @@ Deno.serve(async (req) => {
         outcome: g.outcome, reason: g.reason_code, trace_id: traceId, audited: g.audited, ms: Date.now() - started }));
       if (!g.verdict.allowed) {
         const retry = g.verdict.retry_after_seconds ? ` Retry after ${g.verdict.retry_after_seconds} s.` : "";
-        return rpcOk(id, { content: [{ type: "text", text: `${g.reason_code}: This connection may not make that call right now.${retry}` }], isError: true });
+        const text = `${g.reason_code}: This connection may not make that call right now.${retry}`;
+        if (g.verdict.reason_code === "rate_limited") {
+          // SB-826: same text as v5, plus a machine-readable retry and a Retry-After header.
+          const n = g.verdict.retry_after_seconds;
+          const headers: Record<string, string> = typeof n === "number" && n > 0 ? { "Retry-After": String(n) } : {};
+          return json({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError: true,
+            structuredContent: { error: "rate_limited", retry_after_seconds: n } } }, 200, headers);
+        }
+        return rpcOk(id, { content: [{ type: "text", text }], isError: true });
       }
       if (g.outcome === "allowed") {
         return rpcOk(id, { content: [{ type: "text", text: JSON.stringify(g.result, null, 2) }], structuredContent: g.result });
