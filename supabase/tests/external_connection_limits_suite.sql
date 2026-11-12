@@ -1,4 +1,4 @@
--- External connection limits + identity-refusal audit suite: TC-SB826-F1..F8, TC-SB827-F1..F9
+-- External connection limits + identity-refusal audit suite: TC-SB826-F1..F8, TC-SB827-F1..F10
 -- (SB-826 D1 sb826_precheck_enforce_all_scopes, SB-827 D2 sb827_auth_refusal_audit).
 --
 -- Run as postgres, AFTER both migrations are applied. One transaction that always ends by
@@ -320,6 +320,39 @@ begin
       raise exception '%', rb;
     exception when others then
       if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB827-F4', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
+    end;
+  end;
+
+  -- TC-SB827-F10 (v1.1, QA finding): verified session on its OWN active, unexpired connection sending
+  -- identity reasons -> the DB does not trust the hint: connection_id NULL, reason identity_check_error,
+  -- outcome error; nothing is attached to the live connection
+  begin
+    begin
+      reset role;
+      if exists (select 1 from public.external_connections c where c.id = conn and c.expires_at is not null and c.expires_at <= now()) then
+        raise exception 'the active connection is expired; F10 needs an unexpired one';
+      end if;
+      select count(*) into j from public.external_connection_audit_log x
+       where x.principal_user_id = principal and x.operation = 'auth' and x.created_at > now() - interval '60 seconds';
+      if j + 4 > 10 or b_global + 4 > 30 then raise exception 'busy: % principal auth / % connection-less rows in the last minute; rerun', j, b_global; end if;
+      trace := gen_random_uuid();
+      perform set_config('request.jwt.claims', json_build_object('sub', principal, 'role', 'authenticated', 'client_id', cid)::text, true);
+      set local role authenticated;
+      perform public.external_connection_record_auth_refusal('connection_revoked', trace);
+      perform public.external_connection_record_auth_refusal('connection_disabled', trace);
+      perform public.external_connection_record_auth_refusal('connection_expired', trace);
+      perform public.external_connection_record_auth_refusal('connection_not_found', trace);
+      reset role;
+      select count(*) into n from public.external_connection_audit_log x
+       where x.trace_id = trace and x.connection_id is null and x.reason_code = 'identity_check_error'
+         and x.outcome = 'error' and x.operation = 'auth' and x.principal_user_id = principal and x.oauth_client_id = cid;
+      select count(*) into m from public.external_connection_audit_log x where x.trace_id = trace;
+      select count(*) into k from public.external_connection_audit_log x where x.trace_id = trace and x.connection_id is not null;
+      r := r || jsonb_build_object('TC-SB827-F10', case when n = 4 and m = 4 and k = 0 then 'pass'
+             else format('FAIL: identity_check_error unattached rows %s of 4, rows %s, attached %s', n, m, k) end);
+      raise exception '%', rb;
+    exception when others then
+      if sqlerrm <> rb then r := r || jsonb_build_object('TC-SB827-F10', 'FAIL: error ' || sqlstate || ' ' || sqlerrm); end if;
     end;
   end;
 

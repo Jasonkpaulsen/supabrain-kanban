@@ -196,7 +196,11 @@ test("S-3 the three uncapped list tools now call capRows; list_family_projects b
     assert.match(branch(name), /truncated/, name);
   }
   assert.match(branch("list_family_projects"), /&limit=\$\{LIMITS\.LIST_CAP \+ 1\}/);
-  assert.match(branch("list_family_agents"), /\?limit=\$\{LIMITS\.AGENT_PAIRS_FETCH\}/);
+  // Fetch cap + 1 so exactly 1,000 pairs is not reported as truncated (capRows contract).
+  assert.match(branch("list_family_agents"), /\?limit=\$\{LIMITS\.AGENT_PAIRS_FETCH \+ 1\}/);
+  assert.match(branch("list_family_agents"), /capRows\(fetched, LIMITS\.AGENT_PAIRS_FETCH\)/);
+  assert.match(branch("list_family_agents"), /truncated: agents\.truncated \|\| pairs\.truncated/);
+  assert.doesNotMatch(branch("list_family_agents"), />= LIMITS\.AGENT_PAIRS_FETCH/);
   assert.match(branch("list_my_family_agent_sessions"), /\?limit=\$\{LIMITS\.LIST_CAP \+ 1\}/);
 });
 

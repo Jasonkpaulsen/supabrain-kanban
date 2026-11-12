@@ -168,6 +168,12 @@ test("U-825-5 capRows", () => {
   }
   assert.deepEqual(capRows(null, 100), { rows: [], truncated: false });
   assert.equal(LIMITS.LIST_CAP, 100);
+  // list_family_agents pair fetch (cap + 1 rows requested): exactly 1,000 pairs is not truncation.
+  for (const n of [999, 1_000, 1_001]) {
+    const r = capRows(Array.from({ length: n }, (_, i) => i), LIMITS.AGENT_PAIRS_FETCH);
+    assert.equal(r.rows.length, Math.min(n, 1_000));
+    assert.equal(r.truncated, n > 1_000, `pairs ${n}`);
+  }
 });
 
 test("U-825-6 label_ids 0 / 1 / 20 / 21", () => {
@@ -209,13 +215,24 @@ test("U-827-1 classifyJoseError", () => {
   assert.equal(classifyJoseError(jose("ERR_JWT_CLAIM_VALIDATION_FAILED", "iat")), "token_invalid");
   assert.equal(classifyJoseError(jose("ERR_JWKS_TIMEOUT")), "identity_check_error");
   assert.equal(classifyJoseError(jose("ERR_JWKS_INVALID")), "identity_check_error");
-  assert.equal(classifyJoseError(jose("ERR_SOMETHING_NEW")), "token_invalid");
-  assert.equal(classifyJoseError({}), "token_invalid");
-  assert.equal(classifyJoseError({ code: 5 }), "token_invalid");
-  assert.equal(classifyJoseError(new TypeError("fetch failed")), "token_invalid");
-  assert.equal(classifyJoseError("boom"), "token_invalid");
-  assert.equal(classifyJoseError(null), "token_invalid");
-  assert.equal(classifyJoseError(undefined), "token_invalid");
+  assert.equal(classifyJoseError(jose("ERR_JWT_SOMETHING_NEW")), "token_invalid");   // unknown jose code: the token's
+  assert.equal(classifyJoseError(jose("ERR_JWE_INVALID")), "token_invalid");
+});
+
+test("U-827-1b classifyJoseError: JWKS fetch failures and non-jose throws are ours (identity_check_error)", () => {
+  // jose 5 fetch_jwks: non-200 response and unparseable body throw a generic JOSEError.
+  assert.equal(classifyJoseError(jose("ERR_JOSE_GENERIC")), "identity_check_error");
+  // Plain network failures surface as the runtime's own fetch error, without a jose code.
+  assert.equal(classifyJoseError(new TypeError("fetch failed")), "identity_check_error");
+  assert.equal(classifyJoseError(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })), "identity_check_error");
+  assert.equal(classifyJoseError(Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" })), "identity_check_error");
+  assert.equal(classifyJoseError(new DOMException("aborted", "AbortError")), "identity_check_error");
+  assert.equal(classifyJoseError(jose("ERR_SOMETHING_NEW")), "identity_check_error");
+  assert.equal(classifyJoseError({}), "identity_check_error");
+  assert.equal(classifyJoseError({ code: 5 }), "identity_check_error");
+  assert.equal(classifyJoseError("boom"), "identity_check_error");
+  assert.equal(classifyJoseError(null), "identity_check_error");
+  assert.equal(classifyJoseError(undefined), "identity_check_error");
 });
 
 test("U-827-2 authRefusalRequest: anon has no Authorization; body is two keys and never the token", () => {

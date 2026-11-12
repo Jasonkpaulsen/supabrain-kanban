@@ -527,10 +527,10 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
     case "list_family_agents": {
       const pid = a.project_id === undefined ? null : uuid(a.project_id, "project_id");
       if (pid) await assertMember(caller, pid);
-      // SB-825: the pair fetch is bounded, then the grouped list is capped at 100.
-      const fetched = (await rpc(caller, "list_family_agents", { p_project_id: pid }, `?limit=${LIMITS.AGENT_PAIRS_FETCH}`)) as Record<string, unknown>[] | null;
+      // SB-825: the pair fetch is bounded (cap + 1, so truncation is detectable), then
+      // the grouped list is capped at 100. truncated is true only on genuine truncation.
+      const fetched = (await rpc(caller, "list_family_agents", { p_project_id: pid }, `?limit=${LIMITS.AGENT_PAIRS_FETCH + 1}`)) as Record<string, unknown>[] | null;
       const pairs = capRows(fetched, LIMITS.AGENT_PAIRS_FETCH);
-      const pairsHitCap = (Array.isArray(fetched) ? fetched.length : 0) >= LIMITS.AGENT_PAIRS_FETCH;
       const rows = pairs.rows;
       // The RPC returns one row per (agent, project) pair. Group by agent so the
       // operator sees eleven agents rather than twenty-two, and nest the projects.
@@ -549,7 +549,7 @@ async function callTool(caller: Caller, name: string, args: Record<string, unkno
         byAgent.set(key, entry);
       }
       const agents = capRows([...byAgent.values()], LIMITS.LIST_CAP);
-      return dataEnvelope("family_agents", agents.rows, { limit: LIMITS.LIST_CAP, truncated: agents.truncated || pairsHitCap });
+      return dataEnvelope("family_agents", agents.rows, { limit: LIMITS.LIST_CAP, truncated: agents.truncated || pairs.truncated });
     }
     case "get_family_agent_profile": {
       const ag = uuid(a.agent_id, "agent_id");

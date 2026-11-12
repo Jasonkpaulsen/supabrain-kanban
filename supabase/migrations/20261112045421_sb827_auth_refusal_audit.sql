@@ -52,11 +52,12 @@ begin
         elsif c.principal_user_id is distinct from v_uid then
           v_reason := 'connection_principal_mismatch';
         else
-          v_conn := c.id;
           if c.status <> 'active' then
-            v_reason := 'connection_' || c.status;
+            v_conn := c.id; v_reason := 'connection_' || c.status;
           elsif c.expires_at is not null and c.expires_at <= now() then
-            v_reason := 'connection_expired';
+            v_conn := c.id; v_reason := 'connection_expired';
+          else
+            v_reason := 'identity_check_error';   -- DB sees it active: refusal unconfirmed, not attached
           end if;
         end if;
       end if;

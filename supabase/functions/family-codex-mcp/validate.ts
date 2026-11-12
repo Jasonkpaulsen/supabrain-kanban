@@ -171,13 +171,19 @@ const BAD_SIGNATURE = new Set([
   "ERR_JOSE_ALG_NOT_ALLOWED", "ERR_JOSE_NOT_SUPPORTED",
 ]);
 // Our side could not fetch or read the key set: not the caller's fault.
-const OUR_FAULT = new Set(["ERR_JWKS_TIMEOUT", "ERR_JWKS_INVALID"]);
+// ERR_JOSE_GENERIC is thrown by jose 5 only from the JWKS fetch (non-200 response,
+// unparseable body), never for anything in the caller's token.
+const OUR_FAULT = new Set(["ERR_JWKS_TIMEOUT", "ERR_JWKS_INVALID", "ERR_JOSE_GENERIC"]);
+// Every jose error code; anything else did not come from verifying the token.
+const JOSE_CODE_RE = /^ERR_(JOSE|JWS|JWT|JWE|JWK|JWKS)_[A-Z_]+$/;
 
 // Maps a jose verification failure to a reason by its code (and claim), never by message.
+// A throw without a jose code (a plain network failure such as fetch's TypeError, or any
+// other runtime fault) is ours, not the caller's: identity_check_error.
 export function classifyJoseError(e: unknown): AuthReason {
-  if (!e || typeof e !== "object") return "token_invalid";
+  if (!e || typeof e !== "object") return "identity_check_error";
   const code = (e as { code?: unknown }).code;
-  if (typeof code !== "string") return "token_invalid";
+  if (typeof code !== "string" || !JOSE_CODE_RE.test(code)) return "identity_check_error";
   if (MALFORMED.has(code)) return "token_malformed";
   if (BAD_SIGNATURE.has(code)) return "token_bad_signature";
   if (code === "ERR_JWT_EXPIRED") return "token_expired";
