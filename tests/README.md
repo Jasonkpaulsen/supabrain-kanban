@@ -61,6 +61,23 @@ Live mode needs three things that the sandboxed runner does not have:
 `installWriteStubs` (batch 3) throws under `E2E_LIVE=1` on purpose — that batch
 mutates and has no live-safe mode.
 
+## CI (SB-814)
+
+`.github/workflows/playwright.yml` runs the whole suite (`npx playwright test`)
+on every push and pull request, **in stub transport only**. The job has no
+secrets and `contents: read` only. It refuses `E2E_LIVE=1`, and it sets
+`QA_FIXTURE_EMAIL=qa-fixture@supabrain.test` (the stub session's user) and a
+placeholder password. Those two values are not credentials: the stub answers
+`/token` with a canned session whatever password is typed.
+
+The job fails when any test fails, and also when zero tests ran or the results
+file is missing (ADR-TEST-002). The job summary prints the **run id**. A web
+test case cites that run id as its CI evidence and notes the transport as
+stubbed. `test-results/` is kept as the run's artifact for 30 days.
+
+Cache-version assertions check "vN or later", never a pinned value: every web
+PR bumps `CACHE_NAME` in `sw.js`, so a PR that only bumps it must stay green.
+
 ## Where results go
 
 Results are recorded in Supabase, not just in the HTML report:
