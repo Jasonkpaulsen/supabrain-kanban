@@ -15,7 +15,7 @@
 //         apps fetch the new pages instead of the cached v14 ones.
 // Password recovery: password-reset.js joins the app shell ("Forgot password?" on the
 //         sign-in forms, reset-password.html landing page). v16 so installed apps take it.
-const CACHE_NAME = 'jarvis-pwa-v16';
+const CACHE_NAME = 'jarvis-pwa-v17';
 const SUPABASE_HOST = 'hzqqvbvhnzmgqivfigej.supabase.co';
 
 // App shell files to precache
