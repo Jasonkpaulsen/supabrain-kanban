@@ -138,7 +138,7 @@
         '<div class="uat-top"><span class="uat-code">' + esc(tc.test_code || '') + '</span>' +
         '<span class="uat-title">' + esc(tc.title || '') + '</span>' +
         '<span class="uat-state st-' + v.state + '">' + esc(stateLabel(v, tc)) + '</span>' +
-        ('') + /* SB-814 CI proof: Sign off button deliberately removed */
+        (v.canSign ? '<button type="button" class="uat-btn sb803-signoff" data-sb803-signoff="' + esc(tc.id) + '">Sign off</button>' : '') +
         '</div>' +
         ((v.state === 'current' || v.state === 'earlier') && (tc.uat_notes || mine)
           ? '<div class="uat-meta">' + (mine ? 'channel ' + esc(last.channel) + ' · ' : '') + esc(tc.uat_notes || '') + '</div>' : '') +
