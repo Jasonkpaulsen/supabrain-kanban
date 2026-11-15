@@ -1,0 +1,101 @@
+# SB-814 — run the Playwright suite (tests/e2e) on every push and pull request,
+# against the test stub only.
+#
+# Same posture as secret-scan.yml and function-tests.yml: NO secrets and
+# `contents: read` only. The suite runs in stub transport (tests/e2e/stub.js
+# replays tests/e2e/fixtures/*): every /auth/v1 and /rest/v1 call is answered
+# from the fixtures in the browser, so no request reaches Supabase and no
+# credential exists to leak. E2E_LIVE is never set here, and the first step
+# refuses to run if it is.
+#
+# QA_FIXTURE_EMAIL and QA_FIXTURE_PASSWORD are NOT credentials. The specs refuse
+# to start when they are unset, and the stub's /token route returns a canned
+# session whatever password is typed. The email must equal the stub session's
+# user (qa-fixture@supabrain.test, tests/e2e/stub.js), because batch2 asserts
+# that the signed-in user is QA_FIXTURE_EMAIL.
+#
+# Evidence: a web test case cites this workflow's run id (the job summary prints
+# it), and the JSON results are kept as the run's artifact.
+
+name: playwright
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-stub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      QA_FIXTURE_EMAIL: qa-fixture@supabrain.test
+      QA_FIXTURE_PASSWORD: stub-transport-not-a-credential
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse live mode
+        run: |
+          if [ "${E2E_LIVE:-}" = "1" ]; then
+            echo "::error::E2E_LIVE=1 is not allowed in CI: this job runs against the test stub only (SB-814)"
+            exit 1
+          fi
+          echo "Transport: stub (tests/e2e/stub.js); no request reaches Supabase."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        # npm ci also provides the vendored supabase-js UMD bundle that the stub
+        # serves in place of cdn.jsdelivr.net.
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the Playwright suite against the stub
+        # playwright.config.js reporters: list, plus JSON to test-results/results.json.
+        run: npx playwright test
+
+      - name: Check the results are real
+        # ADR-TEST-002: a check that cannot fail is not a check. A run that
+        # executed zero tests, or whose results file is missing, is a failure
+        # even if the runner exited 0.
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const f = "test-results/results.json";
+            if (!fs.existsSync(f)) { console.log("::error::" + f + " is missing"); process.exit(1); }
+            const s = JSON.parse(fs.readFileSync(f, "utf8")).stats || {};
+            const line = `passed ${s.expected || 0}, failed ${s.unexpected || 0}, flaky ${s.flaky || 0}, skipped ${s.skipped || 0}`;
+            console.log(line);
+            const sum = [
+              "### Playwright (stub transport)",
+              "",
+              `Run id: **${process.env.GITHUB_RUN_ID}** (attempt ${process.env.GITHUB_RUN_ATTEMPT})`,
+              `Commit: ${process.env.GITHUB_SHA}`,
+              `Result: ${line}`,
+              "",
+              "A web test case can cite this run id as CI evidence (SB-814).",
+            ].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, sum + "\n");
+            if (!s.expected) { console.log("::error::no test passed: refusing to report green"); process.exit(1); }
+            if (s.unexpected) { console.log("::error::" + s.unexpected + " test(s) failed"); process.exit(1); }
+          '
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 30
+          if-no-files-found: warn

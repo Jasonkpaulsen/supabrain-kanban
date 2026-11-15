@@ -8,6 +8,7 @@
 const { test, expect } = require('@playwright/test');
 
 const SUPABASE_UMD = require.resolve('@supabase/supabase-js/dist/umd/supabase.js');
+const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const { SESSION } = require('./stub');
 
 const A1 = '11111111-1111-4111-8111-111111111111';
@@ -81,6 +82,13 @@ async function install(page, opts = {}) {
     return { ok: true, image_id: target };
   }
 
+  // SB-814: the fixture images live on example.test, which never resolves. Without
+  // this route the result depended on the runner's network: where the lookup
+  // failed fast (GitHub Actions), the broken <img> drew its alt text (the 248-char
+  // caption in V14) unbroken and the Library scrolled sideways. Where it hung
+  // (the sandbox proxy), the check ran before that and passed. Every image now
+  // loads a 1x1 PNG, so the suite is hermetic and the same everywhere.
+  await page.route('https://example.test/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: PNG_1X1 }));
   await page.route('**/cdn.jsdelivr.net/**', (route) => route.fulfill({ status: 200, contentType: 'application/javascript', path: SUPABASE_UMD }));
   await page.route('**/auth/v1/**', (route) => {
     const url = route.request().url();
