@@ -5,7 +5,8 @@
 -- survives. Pass = the raised message starts with "RLS_INITPLAN PASS". The message carries
 -- only table names, counts and outcome codes, never row values.
 --
--- TC-SB621-01: posture. The 20 policies SB-621 rewrote call auth.uid() only through
+-- TC-SB621-01: posture. The 12 surviving policies SB-621 rewrote (20 at the time; the 8 on the
+-- Kalshi tables went with those tables, SB-818/SB-844) call auth.uid() only through
 -- (select auth.uid()); keep their command and permissive flag; and no policy in public calls
 -- auth.uid()/jwt()/role() bare.
 -- TC-SB621-02: behaviour. For every real user, a stranger and anon, the rows RLS shows on each
@@ -20,20 +21,18 @@ declare
   u record; t text; n bigint; m bigint; fails int; bad text; st text; msg text; plan text; line text;
   owner uuid;
   tbls constant text[] := array['cip_compliance_matrix','ef_assessments','external_connection_audit_log','external_connection_limits',
-    'game_vehicle_lifestyle_grants','game_vehicle_upgrades','game_vehicles','governance_audit','grooming_cadence','research_briefs',
-    'school_courses','trade_log','trade_signals','weather_obs','weather_obs_live'];
+    'game_vehicle_lifestyle_grants','game_vehicle_upgrades','game_vehicles','governance_audit','grooming_cadence',
+    'school_courses'];
   ins_tbls constant text[] := array['cip_compliance_matrix','ef_assessments','game_vehicle_lifestyle_grants','game_vehicle_upgrades',
-    'game_vehicles','governance_audit','research_briefs','school_courses'];
+    'game_vehicles','governance_audit','school_courses'];
   targets constant text[] := array[
     'cip_compliance_matrix.cip_compliance_matrix_owner', 'ef_assessments.Users can manage their own ef_assessments',
     'external_connection_audit_log.ecal_insert_self', 'external_connection_audit_log.ecal_select_own_or_owner',
     'external_connection_limits.ecl_select_related', 'game_vehicle_lifestyle_grants.Users can insert own grants',
     'game_vehicle_upgrades.Users can insert own upgrades', 'game_vehicles.Users can insert own vehicles',
     'governance_audit.governance_audit_insert', 'governance_audit.governance_audit_select',
-    'grooming_cadence.Users manage own grooming records', 'research_briefs.rb_owner_insert',
-    'research_briefs.rb_owner_mark_consumed', 'research_briefs.rb_owner_select', 'research_briefs.rb_owner_update_draft',
-    'school_courses.school_courses_owner', 'trade_log.Select for authenticated', 'trade_signals.Select for authenticated',
-    'weather_obs.Select for authenticated', 'weather_obs_live.Select for authenticated'];
+    'grooming_cadence.Users manage own grooming records',
+    'school_courses.school_courses_owner'];
 begin
   -- TC-SB621-01
   select count(*), string_agg(c.relname || '.' || p.polname, ', ') into n, bad
@@ -41,7 +40,7 @@ begin
    where c.relnamespace = 'public'::regnamespace and (c.relname || '.' || p.polname) = any (targets)
      and coalesce(pg_get_expr(p.polqual, p.polrelid), '') || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '') like '%( SELECT auth.uid() AS uid)%'
      and p.polpermissive;
-  r := r || jsonb_build_object('TC-SB621-01.wrapped', case when n = 20 then 'pass' else 'FAIL: ' || n || ' of 20 wrapped and permissive' end);
+  r := r || jsonb_build_object('TC-SB621-01.wrapped', case when n = 12 then 'pass' else 'FAIL: ' || n || ' of 12 wrapped and permissive' end);
   select count(*), coalesce(string_agg(c.relname || '.' || p.polname, ', '), '') into n, bad
     from pg_policy p join pg_class c on c.oid = p.polrelid
    where c.relnamespace = 'public'::regnamespace
@@ -117,7 +116,7 @@ begin
   perform set_config('request.jwt.claims', jsonb_build_object('sub', owner, 'role', 'authenticated')::text, true);
   set local role authenticated;
   plan := '';
-  for line in execute 'explain select count(*) from public.weather_obs' loop plan := plan || line || E'\n'; end loop;
+  for line in execute 'explain select count(*) from public.cip_compliance_matrix' loop plan := plan || line || E'\n'; end loop;
   reset role;
   r := r || jsonb_build_object('TC-SB621-03.initplan', case when plan ~ 'InitPlan' then 'pass' else 'FAIL: no InitPlan in plan' end);
 
